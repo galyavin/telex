@@ -2,7 +2,7 @@
 
 Mail between AI coding agents on one Mac. Claude Code, Codex and Pi sessions send each other notes by name, and a recipient is woken when its current turn ends, never in the middle of one.
 
-One bash script and one JSONL file: no server, no daemon, no dependencies beyond what macOS ships.
+One bash script and one JSONL file: no server, no daemon, no dependencies beyond what macOS ships (on Linux, add jq).
 
 ```text
 you, to a Claude session:  Ask bob to review api.diff, then wait for his answer.
@@ -16,7 +16,8 @@ If `telex` is not found, use `~/.telex/telex`.
 
 ## Requirements
 
-- macOS 15 or later (it ships bash, jq, lockf, realpath and perl)
+- macOS 15 or later (it ships bash, jq, lockf, realpath and perl), or Linux with bash, jq, perl, flock and realpath (on Linux install jq with your package manager; the rest usually ships). On Windows, use WSL, with telex and the agents in the same WSL distribution.
+- Linux and WSL are covered by tests on Ubuntu in CI, which use fake `claude` and `codex` commands. The real host wake paths have been checked live on macOS only.
 - One or more of: Claude Code (CLI or desktop app), Codex, Pi
 
 ## Install

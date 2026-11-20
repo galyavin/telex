@@ -2,7 +2,14 @@ name: test
 on: [push, pull_request]
 jobs:
   test:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: jq (Linux)
+        if: runner.os == 'Linux'
+        run: command -v jq || sudo apt-get install -y jq
       - run: ./test.sh

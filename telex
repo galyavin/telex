@@ -33,7 +33,9 @@ EOF
 valid() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$ ]] && [ "$1" != telex ] \
   || die "a name is 1-32 letters, digits, '.', '_' or '-' (and not 'telex', which is the room itself)"; }
 room() { mkdir -p "$DIR" && touch "$LOG" || die "cannot write $LOG (an agent sandbox may be blocking it: telex must run outside it)"; }
-locked() { lockf -k "$LOCK" "$0" "$@"; }
+if command -v lockf >/dev/null 2>&1; then WAIT=(lockf -k); TRY=(lockf -s -k -t 0)    # macOS; Linux has flock. Both keep the lock file;
+else WAIT=(flock); TRY=(flock -n -E 75); fi                                       # TRY gives up at once with exit 75 when the lock is held
+locked() { "${WAIT[@]}" "$LOCK" "$0" "$@"; }
 append() { printf '%s\n' "$1" >> "$LOG"; }
 notice() { echo "New telex for $1. When you finish your current task, run: $CMD read $1"; }
 
@@ -78,7 +80,7 @@ wake_codex() {                     # the .wake file marks a notice already queue
 }
 wake_claude() {                    # a stopped Claude session gets headless turns until its mail is read; success = they started
   local name="$1" sid="$2" cl cwd self
-  lockf -s -k -t 0 "$DIR/.listen-$sid" true || return 1   # a listener or a headless drive already has it: no need to ask Claude
+  "${TRY[@]}" "$DIR/.listen-$sid" true || return 1   # a listener or a headless drive already has it: no need to ask Claude
   cl="$(claude_bin)"; self="$(realpath "$0")"; p="$PATH"; [ "$CMD" = telex ] && p="$HOME/.local/bin:$p"
   case "$(status_of "$sid")" in
     stopped) ;;                                           # only a real session list may say "stopped"
@@ -90,7 +92,7 @@ wake_claude() {                    # a stopped Claude session gets headless turn
   cwd="$(grep -m1 -ho '"cwd":"[^"]*"' "$HOME"/.claude/projects/*/"$sid".jsonl 2>/dev/null | head -1 | cut -d'"' -f4)"
   ( cd "${cwd:-$HOME}" && env -i HOME="$HOME" USER="${USER:-}" PATH="$p" TELEX_DIR="$DIR" perl -MPOSIX -e '
       pipe(R, W); if (fork) { close W; <R>; exit 0 } close R; POSIX::setsid(); close W; exec @ARGV' \
-      lockf -s -k -t 0 "$DIR/.listen-$sid" "$self" _drive "$sid" "$cl" </dev/null >/dev/null 2>&1 )   # returns once detached
+      "${TRY[@]}" "$DIR/.listen-$sid" "$self" _drive "$sid" "$cl" </dev/null >/dev/null 2>&1 )   # returns once detached
   echo "$name's session was stopped; started a turn for it to read this."
 }
 
@@ -111,7 +113,7 @@ case "$cmd" in
   listen)
     sid="$(jq -r '.session_id // empty' 2>/dev/null)"
     [ -n "$sid" ] && grep -qF "claude:$sid" "$LOG" 2>/dev/null || exit 0      # non-members leave fast
-    lockf -s -k -t 0 "$DIR/.listen-$sid" "$0" _listen "$sid"                 # one listener per session
+    "${TRY[@]}" "$DIR/.listen-$sid" "$0" _listen "$sid"                 # one listener per session
     rc=$?; exit $(( rc == 75 ? 0 : rc )) ;;                                   # 75: a listener, or the drive of a headless wake, holds it
   install)
     src="$(dirname "$(realpath "$0")")"; room
@@ -191,7 +193,7 @@ case "$cmd" in
     while :; do
       [ "$0" -nt "$stamp" ] && exec "$0" _listen "$sid"   # telex was upgraded: carry on in the new code, still holding the lock;
                                                     # keep `_listen <session id>` stable: old listeners restart into new code with it
-      ls="$(stat -f%z "$LOG" 2>/dev/null || echo 0)"
+      ls=$(( $({ wc -c < "$LOG"; } 2>/dev/null) + 0 ))          # the log's size; 0 when it is missing
       if [ "$ls" != "$lsize" ]; then                # no names left means other sessions took them
         cs="$(due "claude:$sid")" || exit 0; lsize="$ls"
       fi
