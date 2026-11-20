@@ -6,7 +6,12 @@ DIR="${TELEX_DIR:-$HOME/.telex}"
 LOG="$DIR/telex.jsonl"
 LOCK="$DIR/.lock"                          # beside the log, so every process shares it
 SETTINGS="$HOME/.claude/settings.json"
-if [ "$DIR" = "$HOME/.telex" ]; then CMD="~/.telex/telex"; else CMD="$DIR/telex"; fi
+BIN="$HOME/.local/bin/telex"
+if [ "$DIR" = "$HOME/.telex" ]; then FULL="~/.telex/telex"; else FULL="$DIR/telex"; fi
+setcmd() {                                   # agents type `telex` only where the short link really leads to this telex (a file check, not PATH)
+  CMD="$FULL"; [ "$DIR" = "$HOME/.telex" ] && [ -L "$BIN" ] && [ "$BIN" -ef "$DIR/telex" ] && CMD=telex
+}
+setcmd
 
 die() { printf 'telex: %s\n' "$*" >&2; exit 1; }
 usage() {
@@ -74,7 +79,7 @@ wake_codex() {                     # the .wake file marks a notice already queue
 wake_claude() {                    # a stopped Claude session gets headless turns until its mail is read; success = they started
   local name="$1" sid="$2" cl cwd self
   lockf -s -k -t 0 "$DIR/.listen-$sid" true || return 1   # a listener or a headless drive already has it: no need to ask Claude
-  cl="$(claude_bin)"; self="$(realpath "$0")"
+  cl="$(claude_bin)"; self="$(realpath "$0")"; p="$PATH"; [ "$CMD" = telex ] && p="$HOME/.local/bin:$p"
   case "$(status_of "$sid")" in
     stopped) ;;                                           # only a real session list may say "stopped"
     unknown) echo "Couldn't check whether $name's session is running; it gets this when it next runs."; return 1 ;;
@@ -83,7 +88,7 @@ wake_claude() {                    # a stopped Claude session gets headless turn
   signed_in "$cl" \
     || { echo "$name's session isn't running; it gets this when it next runs (to let telex start it, sign in once: claude auth login)."; return 1; }
   cwd="$(grep -m1 -ho '"cwd":"[^"]*"' "$HOME"/.claude/projects/*/"$sid".jsonl 2>/dev/null | head -1 | cut -d'"' -f4)"
-  ( cd "${cwd:-$HOME}" && env -i HOME="$HOME" USER="${USER:-}" PATH="$PATH" TELEX_DIR="$DIR" perl -MPOSIX -e '
+  ( cd "${cwd:-$HOME}" && env -i HOME="$HOME" USER="${USER:-}" PATH="$p" TELEX_DIR="$DIR" perl -MPOSIX -e '
       pipe(R, W); if (fork) { close W; <R>; exit 0 } close R; POSIX::setsid(); close W; exec @ARGV' \
       lockf -s -k -t 0 "$DIR/.listen-$sid" "$self" _drive "$sid" "$cl" </dev/null >/dev/null 2>&1 )   # returns once detached
   echo "$name's session was stopped; started a turn for it to read this."
@@ -118,13 +123,18 @@ case "$cmd" in
       if [ -L "$d/telex" ] || [ ! -e "$d/telex" ]; then ln -sfn "$DIR/skill" "$d/telex" && echo "linked $d/telex"
       else echo "left $d/telex alone (not a link)"; fi
     done
+    if [ "$DIR" = "$HOME/.telex" ] && [ -d "${BIN%/*}" ] && case ":$PATH:" in *":${BIN%/*}:"*) ;; *) false ;; esac; then
+      if [ ! -e "$BIN" ] && [ ! -L "$BIN" ] || [ "$(readlink "$BIN")" = "$DIR/telex" ]; then ln -sfn "$DIR/telex" "$BIN" && echo "linked $BIN"
+      else echo "left $BIN alone (not ours); agents use $FULL"; fi
+    fi
+    setcmd; extra='[]'; [ "$CMD" = telex ] && extra='["telex"]'
     [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
     old="$(jq . "$SETTINGS")" || die "cannot parse $SETTINGS"
-    new="$(printf '%s\n' "$old" | jq --arg h "$DIR/telex listen" --arg a "$CMD" --arg b "$DIR/telex" '
+    new="$(printf '%s\n' "$old" | jq --arg h "$DIR/telex listen" --arg a "$FULL" --arg b "$DIR/telex" --argjson x "$extra" '
       def addhook(ev): .hooks[ev] = ((.hooks[ev] // []) | if any(.[]?.hooks[]?; .command == $h) then .
         else . + [{hooks:[{type:"command",command:$h,asyncRewake:true,timeout:604800}]}] end);
       addhook("Stop") | addhook("StopFailure") | addhook("SessionStart")
-      | .permissions.allow |= ((. // []) | . + (([$a, $b] | unique | map("Bash(\(.):*)")) - .))')"
+      | .permissions.allow |= ((. // []) | . + ((([$a, $b] + $x) | unique | map("Bash(\(.):*)")) - .))')"
     if [ "$new" = "$old" ]; then echo "Claude settings already set."
     else
       echo "Changing $SETTINGS (backup saved beside it):"; diff <(printf '%s\n' "$old") <(printf '%s\n' "$new")
@@ -141,17 +151,19 @@ case "$cmd" in
     case "${DIR%/}" in ""|"${HOME%/}") die "refusing to uninstall: TELEX_DIR is '$DIR' (empty, /, or your home)" ;; esac
     if [ -f "$SETTINGS" ]; then
       old="$(jq . "$SETTINGS")" || die "cannot parse $SETTINGS"
-      new="$(printf '%s\n' "$old" | jq --arg h "$DIR/telex listen" --arg a "$CMD" --arg b "$DIR/telex" '
+      extra='[]'; [ "$DIR" = "$HOME/.telex" ] && extra='["telex"]'
+      new="$(printf '%s\n' "$old" | jq --arg h "$DIR/telex listen" --arg a "$FULL" --arg b "$DIR/telex" --argjson x "$extra" '
         def prune(p): del(p | select(. == [] or . == {}));
         def unhook(ev): .hooks[ev] |= ((. // []) | map(select(any(.hooks[]?; .command == $h) | not))) | prune(.hooks[ev]);
         unhook("Stop") | unhook("StopFailure") | unhook("SessionStart") | prune(.hooks)
-        | .permissions.allow |= ((. // []) - ([$a, $b] | unique | map("Bash(\(.):*)")))
+        | .permissions.allow |= ((. // []) - (([$a, $b] + $x) | unique | map("Bash(\(.):*)")))
         | prune(.permissions.allow) | prune(.permissions)')"
       [ "$new" = "$old" ] || { save_settings "$new" && echo "removed telex from $SETTINGS (backup saved beside it)"; }
     fi
     for d in "$HOME/.claude/skills" "$HOME/.agents/skills"; do
       [ "$(readlink "$d/telex")" = "$DIR/skill" ] && rm "$d/telex"
     done
+    [ "$DIR" = "$HOME/.telex" ] && [ "$(readlink "$BIN")" = "$DIR/telex" ] && rm "$BIN"
     rm -f "$HOME/.pi/agent/extensions/telex.ts" "$DIR/telex" "$DIR/skill/SKILL.md" \
       "$DIR/pi/telex.ts" "$LOG" "$LOG.tmp" "$LOCK" "$DIR"/.listen-* "$DIR"/.wake-*
     rmdir "$DIR/skill" "$DIR/pi" "$DIR" 2>/dev/null

@@ -185,10 +185,30 @@ check "links are kept" "$(rows 'select(.subject=="join" and .from=="alice") | .b
 wait "$bea"; read -r rc at < "$T/rang"
 check "listener: holds while busy, rings once idle" "$rc/$([ "$at" -ge "$idle_at" ] && echo after)" "2/after"
 
+# the `telex` command: linked into ~/.local/bin only when that exists, is on PATH, and holds nothing foreign
+LB="$HOME/.local/bin"; mkdir -p "$LB"; : > "$HOME/stopped"
+hint() { "$C" send bob "$1" h x >/dev/null; "$C" read "$1" | grep -o 'Reply: [^ ]*'; }                # the command an agent is told to type
+"$C" install >/dev/null; check "not linked (not on PATH): full path in hints" "$([ -e "$LB/telex" ] || echo none)/$(hint nl1)" "none/Reply: ~/.telex/telex"
+printf '#!/bin/sh\necho foreign\n' > "$LB/telex"; chmod +x "$LB/telex"
+out="$(PATH="$LB:$PATH" "$C" install)"
+check "a foreign telex in ~/.local/bin is left alone, full path kept" \
+  "$(echo "$out" | grep -c 'left .*telex alone')/$("$LB/telex")/$(hint nl2)" "1/foreign/Reply: ~/.telex/telex"
+rm "$LB/telex"; PATH="$LB:$PATH" "$C" install >/dev/null
+check "linked: hints and notices say telex, rule added, full-path rules kept" \
+  "$(readlink "$LB/telex" | grep -c '/.telex/telex$')/$(hint nl3)/$(PI_SESSION_ID=P-NL "$C" read nl4 >/dev/null; "$C" send bob nl4 hi x >/dev/null; "$C" _bell pi:P-NL | grep -c 'run: telex read nl4')/$(jq -r '[.permissions.allow[] | select(startswith("Bash(") and contains("telex"))] | length' "$HOME/.claude/settings.json")" \
+  "1/Reply: telex/1/3"
+"$C" read nl4 >/dev/null
+CLAUDE_CODE_SESSION_ID=S-LNK "$C" read nl5 >/dev/null; echo S-LNK > "$HOME/stopped"; "$C" send bob nl5 hi x >/dev/null; sleep 1.5
+check "headless turn finds telex through ~/.local/bin" "$(grep -c 'run: telex read nl5' "$HOME/wakes")/$(unread nl5)" "1/0"
+: > "$HOME/stopped"
+
 touch "$HOME/telex" "$HOME/.lock"
 check "uninstall refuses TELEX_DIR of / or home" "$(TELEX_DIR=/ "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$(TELEX_DIR="$HOME/" "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$([ -e "$HOME/telex" ] && echo kept)" "1/1/kept"
 rm -f "$HOME/telex" "$HOME/.lock"
 "$C" uninstall >/dev/null
+check "uninstall removes our link" "$([ -e "$LB/telex" ] || [ -L "$LB/telex" ] || echo gone)" "gone"
+printf '#!/bin/sh\necho foreign\n' > "$LB/telex"; chmod +x "$LB/telex"; "$C" uninstall >/dev/null
+check "uninstall leaves a foreign telex" "$("$LB/telex")" "foreign"
 check "uninstall gives back the user's settings exactly" "$(jq -S . "$HOME/.claude/settings.json")" "$(jq -S . "$T/settings.orig")"
 check "uninstall removes what install added, and the room" \
   "$(find "$HOME/.claude/skills" "$HOME/.agents/skills" "$HOME/.pi/agent/extensions" -name '*telex*' 2>/dev/null | count)/$([ -e "$TELEX_DIR" ] && echo left || echo gone)" "0/gone"

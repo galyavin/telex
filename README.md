@@ -6,11 +6,13 @@ One bash script and one JSONL file: no server, no daemon, no dependencies beyond
 
 ```text
 you, to a Claude session:  Ask bob to review api.diff, then wait for his answer.
-Claude (as alice):         ~/.telex/telex send alice bob 'API review' 'Please review /repo/api.diff'
+Claude (as alice):         telex send alice bob 'API review' 'Please review /repo/api.diff'
                            Sent to bob.
                            ... bob's Codex session is woken, reads the note, replies ...
-telex, after alice's turn: New telex for alice. When you finish your current task, run: ~/.telex/telex read alice
+telex, after alice's turn: New telex for alice. When you finish your current task, run: telex read alice
 ```
+
+If `telex` is not found, use `~/.telex/telex`.
 
 ## Requirements
 
@@ -26,15 +28,16 @@ cd telex && ./telex install
 
 Install copies telex into `~/.telex` (you can delete the clone; to update, run install from a newer one) and:
 
+- links `~/.local/bin/telex` to the script, so agents can type `telex`, when `~/.local/bin` exists, is on your `PATH` and holds no other `telex` (otherwise agents use the full path, and install says so when it leaves a foreign one alone);
 - links the skill for Claude Code (`~/.claude/skills/telex`) and for Codex and Pi (`~/.agents/skills/telex`);
 - adds to `~/.claude/settings.json` the `telex listen` hook (on Stop; on StopFailure, so a turn that ends in an error still starts it; and on SessionStart, so a reopened session listens before its first turn) and allow rules for the telex command, printing the change and keeping the previous file as `settings.json.bak-<time>`;
 - if Pi is installed, copies the Pi extension to `~/.pi/agent/extensions/telex.ts` (run `/reload` in open Pi sessions).
 
 If the Claude CLI isn't signed in, install ends by printing the exact sign-in command. Run it once, so telex can start Claude sessions the desktop app has stopped.
 
-**Sandboxes.** telex writes `~/.telex` and wakes other agents, so it has to run outside an agent's sandbox. Claude Code's sandbox is off by default; if you turn it on, add `"~/.telex/telex *"` to `sandbox.excludedCommands`. Codex's default sandbox blocks telex: run Codex with full access.
+**Sandboxes.** telex writes `~/.telex` and wakes other agents, so it has to run outside an agent's sandbox. Claude Code's sandbox is off by default; if you turn it on, add `"~/.telex/telex *"` and `"telex *"` to `sandbox.excludedCommands`. Codex's default sandbox blocks telex: run Codex with full access.
 
-To remove everything, including any unread mail: `~/.telex/telex uninstall`.
+To remove everything, including any unread mail: `telex uninstall`.
 
 ## Use
 
@@ -43,8 +46,8 @@ Tell a session **"send a message to bob"**, or **"check telex as alice"** to hav
 You can take part from a terminal too:
 
 ```bash
-~/.telex/telex send user alice 'Status?' 'Where are you on the API review?'
-~/.telex/telex read user
+telex send user alice 'Status?' 'Where are you on the API review?'
+telex read user
 tail -F ~/.telex/telex.jsonl | jq -c          # watch the room
 ```
 
@@ -66,7 +69,7 @@ tail -F ~/.telex/telex.jsonl | jq -c          # watch the room
 ## Develop
 
 - `telex` is the whole program (bash); `skill/SKILL.md` is the skill agents load, `pi/telex.ts` the Pi extension.
-- `./test.sh` runs 49 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
+- `./test.sh` runs 56 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
 - `~/.telex/telex` is a copy: after editing, run `./telex install` again. `TELEX_DIR` points telex and the Pi extension at another room folder. Commands starting with `_` are internal.
 
 ## License
