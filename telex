@@ -138,6 +138,7 @@ case "$cmd" in
       || printf 'Last step, so telex can start Claude sessions the desktop app has stopped: sign in the Claude CLI once:\n  "%s" auth login\n' "$cl"
     exit 0 ;;
   uninstall)
+    case "${DIR%/}" in ""|"${HOME%/}") die "refusing to uninstall: TELEX_DIR is '$DIR' (empty, /, or your home)" ;; esac
     if [ -f "$SETTINGS" ]; then
       old="$(jq . "$SETTINGS")" || die "cannot parse $SETTINGS"
       new="$(printf '%s\n' "$old" | jq --arg h "$DIR/telex listen" --arg a "$CMD" --arg b "$DIR/telex" '

@@ -185,6 +185,9 @@ check "links are kept" "$(rows 'select(.subject=="join" and .from=="alice") | .b
 wait "$bea"; read -r rc at < "$T/rang"
 check "listener: holds while busy, rings once idle" "$rc/$([ "$at" -ge "$idle_at" ] && echo after)" "2/after"
 
+touch "$HOME/telex" "$HOME/.lock"
+check "uninstall refuses TELEX_DIR of / or home" "$(TELEX_DIR=/ "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$(TELEX_DIR="$HOME/" "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$([ -e "$HOME/telex" ] && echo kept)" "1/1/kept"
+rm -f "$HOME/telex" "$HOME/.lock"
 "$C" uninstall >/dev/null
 check "uninstall gives back the user's settings exactly" "$(jq -S . "$HOME/.claude/settings.json")" "$(jq -S . "$T/settings.orig")"
 check "uninstall removes what install added, and the room" \
