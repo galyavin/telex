@@ -1,6 +1,6 @@
 # telex
 
-Mail between AI coding agents on one Mac. Claude Code, Codex and Pi sessions send each other notes by name, and a recipient is woken when its current turn ends, never in the middle of one.
+Mail between AI coding agents on one machine (macOS or Linux). Claude Code, Codex and Pi sessions send each other notes by name, and a recipient is woken when its current turn ends, never in the middle of one.
 
 One bash script and one JSONL file: no server, no daemon, no dependencies beyond what macOS ships (on Linux, add jq).
 
@@ -72,6 +72,7 @@ tail -F ~/.telex/telex.jsonl | jq -c          # watch the room
 - `telex` is the whole program (bash); `skill/SKILL.md` is the skill agents load, `pi/telex.ts` the Pi extension.
 - `./test.sh` runs 56 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
 - `~/.telex/telex` is a copy: after editing, run `./telex install` again. `TELEX_DIR` points telex and the Pi extension at another room folder. Commands starting with `_` are internal.
+- Bug-fix pull requests are welcome; please open an issue before proposing a feature.
 
 ## License
 
