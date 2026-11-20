@@ -25,7 +25,7 @@ case "$1" in
     done; echo ']' ;;
   auth) printf '{"loggedIn":%s}\n' "$(cat "$HOME/loggedin" 2>/dev/null || echo true)" ;;
   -p) echo "$(pwd -P) session=${CLAUDE_CODE_SESSION_ID:-} $*" >> "$HOME/wakes"   # env -i keeps HOME, USER, PATH, TELEX_DIR
-      sleep 0.3; [ -f "$HOME/noread" ] || eval "${4##*run: }" >/dev/null 2>&1
+      sleep 0.3; [ -f "$HOME/noread" ] || eval "${4##*Run: }" >/dev/null 2>&1
       echo "{\"session_id\":\"$3\"}" | perl -e 'alarm 3; exec @ARGV' "$TELEX_DIR/telex" listen >/dev/null 2>&1; echo $? >> "$HOME/hook-rc"   # the turn's Stop hook
       sleep "$(cat "$HOME/after" 2>/dev/null || echo 0)" ;;
 esac
@@ -195,11 +195,11 @@ check "a foreign telex in ~/.local/bin is left alone, full path kept" \
   "$(echo "$out" | grep -c 'left .*telex alone')/$("$LB/telex")/$(hint nl2)" "1/foreign/Reply: ~/.telex/telex"
 rm "$LB/telex"; PATH="$LB:$PATH" "$C" install >/dev/null
 check "linked: hints and notices say telex, rule added, full-path rules kept" \
-  "$(readlink "$LB/telex" | grep -c '/.telex/telex$')/$(hint nl3)/$(PI_SESSION_ID=P-NL "$C" read nl4 >/dev/null; "$C" send bob nl4 hi x >/dev/null; "$C" _bell pi:P-NL | grep -c 'run: telex read nl4')/$(jq -r '[.permissions.allow[] | select(startswith("Bash(") and contains("telex"))] | length' "$HOME/.claude/settings.json")" \
+  "$(readlink "$LB/telex" | grep -c '/.telex/telex$')/$(hint nl3)/$(PI_SESSION_ID=P-NL "$C" read nl4 >/dev/null; "$C" send bob nl4 hi x >/dev/null; "$C" _bell pi:P-NL | grep -c 'Run: telex read nl4')/$(jq -r '[.permissions.allow[] | select(startswith("Bash(") and contains("telex"))] | length' "$HOME/.claude/settings.json")" \
   "1/Reply: telex/1/3"
 "$C" read nl4 >/dev/null
 CLAUDE_CODE_SESSION_ID=S-LNK "$C" read nl5 >/dev/null; echo S-LNK > "$HOME/stopped"; "$C" send bob nl5 hi x >/dev/null; sleep 1.5
-check "headless turn finds telex through ~/.local/bin" "$(grep -c 'run: telex read nl5' "$HOME/wakes")/$(unread nl5)" "1/0"
+check "headless turn finds telex through ~/.local/bin" "$(grep -c 'Run: telex read nl5' "$HOME/wakes")/$(unread nl5)" "1/0"
 : > "$HOME/stopped"
 
 touch "$HOME/telex" "$HOME/.lock"
