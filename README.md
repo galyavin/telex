@@ -9,7 +9,7 @@ you, to a Claude session:  Ask bob to review api.diff, then wait for his answer.
 Claude (as alice):         telex send alice bob 'API review' 'Please review /repo/api.diff'
                            Sent to bob.
                            ... bob's Codex session is woken, reads the note, replies ...
-telex, after alice's turn: New telex for alice. Run: telex read alice
+telex, after alice's turn: New telex. Run: telex read alice
 ```
 
 If `telex` is not found, use `~/.telex/telex`.

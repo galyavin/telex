@@ -112,10 +112,10 @@ check "takeover: old listener goes quiet, new one rings" "$(cat "$T/old.rc")/$(g
 # an upgrade reaches a running listener: it carries on in the new code
 CLAUDE_CODE_SESSION_ID=S-UP "$C" read upa >/dev/null
 ( hookin S-UP | "$TELEX_DIR/telex" listen > "$T/up.out" 2>&1; echo $? > "$T/up.rc" ) & up=$!
-sleep 1.2; sed 's/New telex for/New telex (upgraded) for/' "$TELEX_DIR/telex" > "$TELEX_DIR/telex.tmp"
+sleep 1.2; sed 's/New telex\./New telex (upgraded)./' "$TELEX_DIR/telex" > "$TELEX_DIR/telex.tmp"
 chmod +x "$TELEX_DIR/telex.tmp"; mv "$TELEX_DIR/telex.tmp" "$TELEX_DIR/telex"
 sleep 1.2; "$C" send bob upa hi x >/dev/null; wait "$up"
-check "an upgrade reaches a running listener" "$(cat "$T/up.rc")/$(grep -c 'New telex (upgraded) for upa' "$T/up.out")" "2/1"
+check "an upgrade reaches a running listener" "$(cat "$T/up.rc")/$(grep -c 'New telex (upgraded)\. Run: .* read upa' "$T/up.out")" "2/1"
 cp "$C" "$TELEX_DIR/telex"; "$C" read upa >/dev/null
 
 "$C" send bob telex x y >/dev/null 2>&1; a=$?; "$C" read telex >/dev/null 2>&1; b=$?
@@ -128,7 +128,7 @@ CLAUDE_CODE_SESSION_ID=S-STOP "$C" read sleepy >/dev/null
 out="$(CLAUDE_CODE_SESSION_ID=S-SENDER "$C" send bob sleepy hi there)"
 "$C" send bob sleepy again x >/dev/null; sleep 1.5
 check "stopped session gets one turn, in its folder, as itself, and reads" \
-  "$(count "$FAKE_LOG")/$(grep -c "^$(realpath "$T/proj") session= -p --resume S-STOP New telex for sleepy" "$FAKE_LOG")/$(echo "$out" | grep -c 'started a turn')/$(unread sleepy)" "1/1/1/0"
+  "$(count "$FAKE_LOG")/$(grep -c "^$(realpath "$T/proj") session= -p --resume S-STOP New telex\. Run: .*read sleepy" "$FAKE_LOG")/$(echo "$out" | grep -c 'started a turn')/$(unread sleepy)" "1/1/1/0"
 : > "$FAKE_LOG"; : > "$HOME/stopped"; "$C" send bob sleepy running x >/dev/null; sleep 0.5
 check "running session is left to its listener" "$(count "$FAKE_LOG")" "0"
 echo S-STOP > "$HOME/stopped"; echo false > "$HOME/loggedin"
@@ -168,9 +168,9 @@ check "waiting mail with a stale wake is woken again" "$(count "$HOME/pushes")" 
 PI_SESSION_ID=P-1 CLAUDE_CODE_SESSION_ID=S-OUTER "$C" read pia >/dev/null
 check "a Pi worker inside a Claude session links as itself" "$(rows 'select(.subject=="join" and .from=="pia") | .body')" "pi:P-1"
 a="$("$C" _bell pi:P-1)"; "$C" send bob pia hi x >/dev/null; b="$("$C" _bell pi:P-1)"; "$C" read pia >/dev/null; c="$("$C" _bell pi:P-1)"
-check "_bell rings only while mail waits" "$([ -z "$a" ] && echo quiet)/$(echo "$b" | grep -c 'New telex for pia')/$([ -z "$c" ] && echo quiet)" "quiet/1/quiet"
+check "_bell rings only while mail waits" "$([ -z "$a" ] && echo quiet)/$(echo "$b" | grep -c 'read pia$')/$([ -z "$c" ] && echo quiet)" "quiet/1/quiet"
 PI_SESSION_ID=P-2 "$C" send old1 bob x y >/dev/null; PI_SESSION_ID=P-2 "$C" read new1 >/dev/null; "$C" send bob old1 hi x >/dev/null
-check "a session that took a second name still rings for the first" "$("$C" _bell pi:P-2 | grep -c 'New telex for old1')" "1"
+check "a session that took a second name still rings for the first" "$("$C" _bell pi:P-2 | grep -c 'read old1$')" "1"
 "$C" read old1 >/dev/null; "$C" read bob >/dev/null
 
 # names ignore case

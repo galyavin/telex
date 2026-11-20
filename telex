@@ -37,7 +37,7 @@ if command -v lockf >/dev/null 2>&1; then WAIT=(lockf -k); TRY=(lockf -s -k -t 0
 else WAIT=(flock); TRY=(flock -n -E 75); fi                                       # TRY gives up at once with exit 75 when the lock is held
 locked() { "${WAIT[@]}" "$LOCK" "$0" "$@"; }
 append() { printf '%s\n' "$1" >> "$LOG"; }
-notice() { echo "New telex for $1. Run: $CMD read $1"; }
+notice() { echo "New telex. Run: $CMD read $1"; }
 
 line() { jq -cn --arg f "$1" --arg t "$2" --arg s "$3" --arg b "$4" \
   '{ts:(now|todate),from:$f,to:$t,subject:$s,body:$b}'; }
