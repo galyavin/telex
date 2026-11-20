@@ -1,0 +1,198 @@
+#!/bin/bash
+# telex: agents on one Mac pass notes through one JSONL file. See README.md.
+set -u
+
+DIR="${TELEX_DIR:-$HOME/.telex}"
+LOG="$DIR/telex.jsonl"
+LOCK="$DIR/.lock"                          # beside the log, so every process shares it
+SETTINGS="$HOME/.claude/settings.json"
+if [ "$DIR" = "$HOME/.telex" ]; then CMD="~/.telex/telex"; else CMD="$DIR/telex"; fi
+
+die() { printf 'telex: %s\n' "$*" >&2; exit 1; }
+usage() {
+  cat >&2 <<EOF
+telex: notes between agents on this Mac, kept in $LOG
+
+  telex send <from> <to> <subject> [body]    send a note (as <from>)
+  telex read <name>                          print your unread mail (it is then deleted)
+  telex listen                               hook: wakes this Claude session for its mail
+  telex install                              copy telex to $DIR and set up Claude, Codex and Pi
+  telex uninstall                            remove all of that, and the room
+
+Sending or reading under a name links that name to this session, so it gets
+woken. Every line in the file is {ts, from, to, subject, body}; those links
+are notes to "telex". Watch the room: tail -F $LOG | jq -c
+EOF
+  exit 2
+}
+valid() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$ ]] && [ "$1" != telex ] \
+  || die "a name is 1-32 letters, digits, '.', '_' or '-' (and not 'telex', which is the room itself)"; }
+room() { mkdir -p "$DIR" && touch "$LOG" || die "cannot write $LOG (an agent sandbox may be blocking it: telex must run outside it)"; }
+locked() { lockf -k "$LOCK" "$0" "$@"; }
+append() { printf '%s\n' "$1" >> "$LOG"; }
+notice() { echo "New telex for $1. When you finish your current task, run: $CMD read $1"; }
+
+line() { jq -cn --arg f "$1" --arg t "$2" --arg s "$3" --arg b "$4" \
+  '{ts:(now|todate),from:$f,to:$t,subject:$s,body:$b}'; }
+lines() { jq -R -n "$@" "$LOG"; }                                # lenient: bad lines are skipped
+LINKS='reduce (inputs|fromjson?|select(.to=="telex" and .subject=="join")) as $m ({}; .[$m.from] = $m.body)'
+session_of() { lines -r --arg c "$1" "$LINKS"' | .[$c] // empty'; }              # the session behind a name
+name_of() { lines -r --arg s "$1" "$LINKS"' | to_entries[] | select(.value == $s) | .key'; }   # every name linked to a session
+due() { local c none=1; for c in $(name_of "$1"); do none=0; [ "$(unread_n "$c")" -gt 0 ] && { echo "$c"; return 0; }; done
+  return $none; }                  # prints one of a session's names with mail; fails when the session has no names left
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }       # names ignore case: Bob and bob are one mailbox
+unread() { lines -c --arg c "$1" 'inputs | fromjson? | select(.to == $c)'; }   # read mail is deleted, so all of it is unread
+unread_n() { unread "$1" 2>/dev/null | wc -l; }              # wc pads its count; callers only compare it as a number
+compact() {                        # under the lock: drop the first $2 messages to $1 (the ones just shown), keep the rest in order
+  lines -c --arg c "$1" --argjson n "$2" 'foreach (inputs | fromjson?) as $m (0; if $m.to == $c then . + 1 else . end;
+    if $m.to == $c and . <= $n then empty else $m end)' > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+}
+here() { if [ -n "${PI_SESSION_ID:-}" ]; then echo "pi:$PI_SESSION_ID"          # Pi first: a Pi worker started by
+  elif [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then echo "claude:$CLAUDE_CODE_SESSION_ID"   # another agent inherits its id
+  elif [ -n "${CODEX_THREAD_ID:-}" ]; then echo "codex:$CODEX_THREAD_ID"; else echo none; fi; }
+register() {                       # under the lock: link the name to this session; one that can't be woken never replaces one that can
+  local cur old; cur="$(here)"; old="$(session_of "$1")"
+  [ "$cur" = "$old" ] && return 0
+  [ "$cur" = none ] && [ -n "$old" ] && return 0
+  append "$(line "$1" telex join "$cur")"
+}
+claude_bin() {                     # the running Claude's own binary, else the newest one bundled with the desktop app, else PATH
+  [ -x "${CLAUDE_CODE_EXECPATH:-}" ] && { echo "$CLAUDE_CODE_EXECPATH"; return; }
+  ls -dt "$HOME/Library/Application Support/Claude/claude-code/"*/*/claude.app/Contents/MacOS/claude 2>/dev/null | head -1 | grep . \
+    || command -v claude; }
+signed_in() { "$1" auth status 2>/dev/null | jq -e '.loggedIn' >/dev/null; }
+save_settings() { cp "$SETTINGS" "$SETTINGS.bak-$(date +%Y%m%d%H%M%S)" && printf '%s\n' "$1" > "$SETTINGS"; }   # the old file is kept beside it
+status_of() {                      # idle, busy, waiting, stopped (not listed) or unknown, from Claude's own session list
+  "$(claude_bin)" agents --json 2>/dev/null \
+    | jq -r --arg s "$1" 'select(type == "array") | first(.[] | select(.sessionId == $s) | .status // "idle") // "stopped"' 2>/dev/null \
+    | grep . || echo unknown; }                  # anything but a real session list prints nothing, which reads as unknown
+wake_codex() {                     # the .wake file marks a notice already queued: Codex has no lock to tell us
+  local name="$1" sid="$2" cx; cx="$(command -v codex || echo /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex)"
+  "$cx" queue --thread "$sid" --message "$(notice "$name")" --resume >/dev/null 2>&1 && touch "$DIR/.wake-$sid" \
+    || echo "Could not wake $name in Codex; it will see the mail when it next reads. Do not send again."
+}
+wake_claude() {                    # a stopped Claude session gets headless turns until its mail is read; success = they started
+  local name="$1" sid="$2" cl cwd self
+  lockf -s -k -t 0 "$DIR/.listen-$sid" true || return 1   # a listener or a headless drive already has it: no need to ask Claude
+  cl="$(claude_bin)"; self="$(realpath "$0")"
+  case "$(status_of "$sid")" in
+    stopped) ;;                                           # only a real session list may say "stopped"
+    unknown) echo "Couldn't check whether $name's session is running; it gets this when it next runs."; return 1 ;;
+    *) return 1 ;;                                        # running, and no listener yet: the next Stop starts one
+  esac
+  signed_in "$cl" \
+    || { echo "$name's session isn't running; it gets this when it next runs (to let telex start it, sign in once: claude auth login)."; return 1; }
+  cwd="$(grep -m1 -ho '"cwd":"[^"]*"' "$HOME"/.claude/projects/*/"$sid".jsonl 2>/dev/null | head -1 | cut -d'"' -f4)"
+  ( cd "${cwd:-$HOME}" && env -i HOME="$HOME" USER="${USER:-}" PATH="$PATH" TELEX_DIR="$DIR" perl -MPOSIX -e '
+      pipe(R, W); if (fork) { close W; <R>; exit 0 } close R; POSIX::setsid(); close W; exec @ARGV' \
+      lockf -s -k -t 0 "$DIR/.listen-$sid" "$self" _drive "$sid" "$cl" </dev/null >/dev/null 2>&1 )   # returns once detached
+  echo "$name's session was stopped; started a turn for it to read this."
+}
+
+cmd="${1:-}"; [ $# -ge 1 ] && shift
+case "$cmd" in
+  send)
+    [ $# -ge 3 ] || usage; set -- "$(lower "$1")" "$(lower "$2")" "${@:3}"; valid "$1"; valid "$2"; room
+    target="$(session_of "$2")"; sid="${target#*:}"
+    due="$(locked _send "$2" "$sid" "$(line "$1" "$2" "$3" "${*:4}")" "$1")" || exit 1
+    if [ -n "$target" ]; then echo "Sent to $2."
+    else echo "Sent to $2 (new name; it gets this when it first reads)."; fi
+    [ "$due" = wake ] || exit 0
+    case "$target" in codex:*) wake_codex "$2" "$sid" ;; claude:*) wake_claude "$2" "$sid" ;; esac
+    exit 0 ;;
+  read)
+    [ $# -eq 1 ] || usage; set -- "$(lower "$1")"; valid "$1"; room
+    locked _read "$1" ;;
+  listen)
+    sid="$(jq -r '.session_id // empty' 2>/dev/null)"
+    [ -n "$sid" ] && grep -qF "claude:$sid" "$LOG" 2>/dev/null || exit 0      # non-members leave fast
+    lockf -s -k -t 0 "$DIR/.listen-$sid" "$0" _listen "$sid"                 # one listener per session
+    rc=$?; exit $(( rc == 75 ? 0 : rc )) ;;                                   # 75: a listener, or the drive of a headless wake, holds it
+  install)
+    src="$(dirname "$(realpath "$0")")"; room
+    for f in telex skill/SKILL.md pi/telex.ts; do   # copy, so the download can go; mv swaps files under running listeners safely
+      mkdir -p "$(dirname "$DIR/$f")" && cp "$src/$f" "$DIR/$f.tmp" && mv "$DIR/$f.tmp" "$DIR/$f" || die "cannot copy $f into $DIR"
+    done
+    for d in "$HOME/.claude/skills" "$HOME/.agents/skills"; do
+      mkdir -p "$d"
+      if [ -L "$d/telex" ] || [ ! -e "$d/telex" ]; then ln -sfn "$DIR/skill" "$d/telex" && echo "linked $d/telex"
+      else echo "left $d/telex alone (not a link)"; fi
+    done
+    [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+    old="$(jq . "$SETTINGS")" || die "cannot parse $SETTINGS"
+    new="$(printf '%s\n' "$old" | jq --arg h "$DIR/telex listen" --arg a "$CMD" --arg b "$DIR/telex" '
+      def addhook(ev): .hooks[ev] = ((.hooks[ev] // []) | if any(.[]?.hooks[]?; .command == $h) then .
+        else . + [{hooks:[{type:"command",command:$h,asyncRewake:true,timeout:604800}]}] end);
+      addhook("Stop") | addhook("StopFailure") | addhook("SessionStart")
+      | .permissions.allow |= ((. // []) | . + (([$a, $b] | unique | map("Bash(\(.):*)")) - .))')"
+    if [ "$new" = "$old" ]; then echo "Claude settings already set."
+    else
+      echo "Changing $SETTINGS (backup saved beside it):"; diff <(printf '%s\n' "$old") <(printf '%s\n' "$new")
+      save_settings "$new" || die "cannot write $SETTINGS"
+    fi
+    if [ -d "$HOME/.pi/agent" ]; then
+      f="$HOME/.pi/agent/extensions/telex.ts"
+      cmp -s "$DIR/pi/telex.ts" "$f" || { mkdir -p "${f%/*}" && cp "$DIR/pi/telex.ts" "$f" && echo "installed $f (run /reload in open Pi sessions)"; }
+    fi
+    cl="$(claude_bin)"; [ -z "$cl" ] || signed_in "$cl" \
+      || printf 'Last step, so telex can start Claude sessions the desktop app has stopped: sign in the Claude CLI once:\n  "%s" auth login\n' "$cl"
+    exit 0 ;;
+  uninstall)
+    if [ -f "$SETTINGS" ]; then
+      old="$(jq . "$SETTINGS")" || die "cannot parse $SETTINGS"
+      new="$(printf '%s\n' "$old" | jq --arg h "$DIR/telex listen" --arg a "$CMD" --arg b "$DIR/telex" '
+        def prune(p): del(p | select(. == [] or . == {}));
+        def unhook(ev): .hooks[ev] |= ((. // []) | map(select(any(.hooks[]?; .command == $h) | not))) | prune(.hooks[ev]);
+        unhook("Stop") | unhook("StopFailure") | unhook("SessionStart") | prune(.hooks)
+        | .permissions.allow |= ((. // []) - ([$a, $b] | unique | map("Bash(\(.):*)")))
+        | prune(.permissions.allow) | prune(.permissions)')"
+      [ "$new" = "$old" ] || { save_settings "$new" && echo "removed telex from $SETTINGS (backup saved beside it)"; }
+    fi
+    for d in "$HOME/.claude/skills" "$HOME/.agents/skills"; do
+      [ "$(readlink "$d/telex")" = "$DIR/skill" ] && rm "$d/telex"
+    done
+    rm -f "$HOME/.pi/agent/extensions/telex.ts" "$DIR/telex" "$DIR/skill/SKILL.md" \
+      "$DIR/pi/telex.ts" "$LOG" "$LOG.tmp" "$LOCK" "$DIR"/.listen-* "$DIR"/.wake-*
+    rmdir "$DIR/skill" "$DIR/pi" "$DIR" 2>/dev/null
+    echo "telex removed."; exit 0 ;;
+
+  _send)                              # args: recipient, its session id, the line, sender. Skip the wake only while a queued Codex notice
+                                      # (under 10 minutes old) still covers mail that was already waiting; a Claude wake checks its lock
+    register "$4"
+    { [ -z "$(find "$DIR/.wake-$2" -mmin -10 2>/dev/null)" ] || [ "$(unread_n "$1")" -eq 0 ]; } && echo wake
+    append "$3" ;;
+  _read)
+    register "$1"
+    msgs="$(unread "$1")"
+    if [ -z "$msgs" ]; then echo "No unread mail for $1."; exit 0; fi
+    n="$(printf '%s\n' "$msgs" | jq -n '[foreach inputs as $m (0; . + ($m.subject + $m.body | length)) | select(. <= 12000)]
+      | [length, 1] | max')" || exit 1                  # show the first messages that fit ~12 KB, at least one
+    printf '%s\n' "$msgs" | head -n "$n" | jq -r '"--- from \(.from) at \(.ts): \(.subject)\n\(.body)\n"' || exit 1
+    left=$(( $(printf '%s\n' "$msgs" | wc -l) - n ))
+    compact "$1" "$n"
+    echo "You are $1. Reply: $CMD send $1 <to> 'Re: <subject>' '<body>'"
+    if [ "$left" -gt 0 ]; then echo "$left more unread. Run the same command again now."; fi ;;
+  _listen)                            # rings once this session is idle and one of its names has unread mail
+    sid="$1"; lsize=-1; stamp="$DIR/.listen-$sid"
+    touch -r "$0" "$stamp"                          # remember this script's date: a reinstall gives it a newer one
+    while :; do
+      [ "$0" -nt "$stamp" ] && exec "$0" _listen "$sid"   # telex was upgraded: carry on in the new code, still holding the lock;
+                                                    # keep `_listen <session id>` stable: old listeners restart into new code with it
+      ls="$(stat -f%z "$LOG" 2>/dev/null || echo 0)"
+      if [ "$ls" != "$lsize" ]; then                # no names left means other sessions took them
+        cs="$(due "claude:$sid")" || exit 0; lsize="$ls"
+      fi
+      if [ -n "$cs" ]; then
+        case "$(status_of "$sid")" in idle) notice "$cs" >&2; exit 2 ;; stopped) exit 0 ;; esac
+        sleep 15                                    # busy, waiting for its user, or unknown: ask again later
+      else sleep 1; fi
+    done ;;
+  _drive)                             # under the session's lock: headless turns while one of its names has unread mail, at most 3
+    for i in 1 2 3; do
+      cs="$(due "claude:$1")"; [ -n "$cs" ] || exit 0
+      "$2" -p --resume "$1" "$(notice "$cs")" </dev/null >/dev/null 2>&1 || exit 0
+    done ;;
+  _bell)                              # for the Pi extension: the notice, if one of this session's names has unread mail
+    cs="$(due "$1")"; [ -n "$cs" ] && notice "$cs"; exit 0 ;;
+  *) usage ;;
+esac
