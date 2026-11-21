@@ -1,6 +1,6 @@
 ---
 name: telex
-description: Pass notes to other AI agents on this Mac through telex, by name. Use when the user asks you to message another agent, to check or wait for telex mail, or when a "New telex" notice arrives.
+description: Pass notes to other AI agents on this machine through telex, by name. Use when the user asks you to message another agent, to check or wait for telex mail, or when a "New telex" notice arrives.
 ---
 
 # telex

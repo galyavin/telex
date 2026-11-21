@@ -131,6 +131,11 @@ check "stopped session gets one turn, in its folder, as itself, and reads" \
   "$(count "$FAKE_LOG")/$(grep -c "^$(realpath "$T/proj") session= -p --resume S-STOP New telex\. Run: .*read sleepy" "$FAKE_LOG")/$(echo "$out" | grep -c 'started a turn')/$(unread sleepy)" "1/1/1/0"
 : > "$FAKE_LOG"; : > "$HOME/stopped"; "$C" send bob sleepy running x >/dev/null; sleep 0.5
 check "running session is left to its listener" "$(count "$FAKE_LOG")" "0"
+printf '{"cwd":"%s"}\n{"cwd":"%s"}\n' "$T/moved-away" "$T/proj" > "$HOME/.claude/projects/p/S-MV.jsonl"      # the folder was renamed mid-session
+CLAUDE_CODE_SESSION_ID=S-MV "$C" read mvx >/dev/null; echo S-MV > "$HOME/stopped"; : > "$FAKE_LOG"
+"$C" send bob mvx hi x >/dev/null; sleep 1.5
+check "a session whose first folder is gone is woken in its last one" "$(grep -c "^$(realpath "$T/proj") session= -p --resume S-MV" "$FAKE_LOG")/$(unread mvx)" "1/0"
+: > "$HOME/stopped"; : > "$FAKE_LOG"
 echo S-STOP > "$HOME/stopped"; echo false > "$HOME/loggedin"
 out="$("$C" send bob sleepy nologin x)"; out="$out$("$C" send bob sleepy nologin2 x)"; sleep 0.5
 check "without a CLI sign-in every send only reports" "$(count "$FAKE_LOG")/$(echo "$out" | grep -c "isn't running")" "0/2"
@@ -200,7 +205,7 @@ check "linked: hints and notices say telex, rule added, full-path rules kept" \
 "$C" read nl4 >/dev/null
 CLAUDE_CODE_SESSION_ID=S-LNK "$C" read nl5 >/dev/null; echo S-LNK > "$HOME/stopped"; "$C" send bob nl5 hi x >/dev/null; sleep 1.5
 check "headless turn finds telex through ~/.local/bin" "$(grep -c 'Run: telex read nl5' "$HOME/wakes")/$(unread nl5)" "1/0"
-: > "$HOME/stopped"
+: > "$HOME/stopped"; : > "$FAKE_LOG"
 
 touch "$HOME/telex" "$HOME/.lock"
 check "uninstall refuses TELEX_DIR of / or home" "$(TELEX_DIR=/ "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$(TELEX_DIR="$HOME/" "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$([ -e "$HOME/telex" ] && echo kept)" "1/1/kept"
