@@ -30,7 +30,7 @@ case "$1" in
       sleep "$(cat "$HOME/after" 2>/dev/null || echo 0)" ;;
 esac
 EOF
-printf '#!/bin/sh\n[ "$1" = app-server ] && exit 0\necho push >> "$HOME/pushes"; [ -z "${FAKE_CODEX_WARN:-}" ] || echo "Warning: queued, but could not resume" >&2; exit ${FAKE_CODEX_RC:-1}\n' > "$T/bin/codex"; chmod +x "$T/bin/claude" "$T/bin/codex"
+printf '#!/bin/sh\n[ "$1" = app-server ] && { echo "${CLAUDE_CODE_SESSION_ID:-none}" > "$HOME/daemon-env"; exit 0; }\necho push >> "$HOME/pushes"; [ -z "${FAKE_CODEX_WARN:-}" ] || echo "Warning: queued, but could not resume" >&2; exit ${FAKE_CODEX_RC:-1}\n' > "$T/bin/codex"; chmod +x "$T/bin/claude" "$T/bin/codex"
 export PATH="$T/bin:$PATH"
 
 # install from a download that is then deleted (uninstall at the end must give back these settings exactly)
@@ -171,8 +171,9 @@ check "after a read, the next send pushes again" "$(count "$HOME/pushes")" "2"
 touch -t 202001010000 "$TELEX_DIR/.wake-T-2"; FAKE_CODEX_RC=0 "$C" send bob cx2 stale x >/dev/null
 check "waiting mail with a stale wake is woken again" "$(count "$HOME/pushes")" "3"
 "$C" read cx2 >/dev/null
-CODEX_THREAD_ID=T-3 "$C" read cx3 >/dev/null; out="$(FAKE_CODEX_RC=0 FAKE_CODEX_WARN=1 "$C" send bob cx3 hi x)"
-check "a Codex queue that warns is not a wake" "$(echo "$out" | grep -c 'Could not wake cx3')/$([ -e "$TELEX_DIR/.wake-T-3" ] && echo wake || echo none)" "1/none"
+CODEX_THREAD_ID=T-3 "$C" read cx3 >/dev/null; out="$(CLAUDE_CODE_SESSION_ID=S-C FAKE_CODEX_RC=0 FAKE_CODEX_WARN=1 "$C" send cxs cx3 hi x)"
+check "a Codex queue that warns is not a wake; the daemon starts without our session" \
+  "$(echo "$out" | grep -c 'Could not wake cx3')/$([ -e "$TELEX_DIR/.wake-T-3" ] && echo wake || echo none)/$(cat "$HOME/daemon-env")" "1/none/none"
 "$C" read cx3 >/dev/null
 
 # Pi: a Pi session links as pi:<id> even inside another agent; its extension asks _bell
