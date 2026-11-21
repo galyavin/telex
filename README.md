@@ -75,7 +75,7 @@ Your own machines (macOS, Linux, WSL) can talk over ssh. Address the first messa
 ## Develop
 
 - `telex` is the whole program (bash); `skill/SKILL.md` is the skill agents load, `pi/telex.ts` the Pi extension.
-- `./test.sh` runs 66 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
+- `./test.sh` runs 67 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
 - `~/.telex/telex` is a copy: after editing, run `./telex install` again. `TELEX_DIR` points telex and the Pi extension at another room folder. Commands starting with `_` are internal.
 - Bug-fix pull requests are welcome; please open an issue before proposing a feature.
 

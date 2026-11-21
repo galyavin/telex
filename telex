@@ -118,6 +118,7 @@ case "$cmd" in
     set -- "$(lower "$1")" "$(lower "$to")" "${@:3}"; valid "$1"; valid "$2"; room
     link="$(session_of "$2")"; [ -n "$host" ] || [[ "$link" != ssh:* ]] || host="${link#ssh:}"
     [ -n "$host" ] || deliver "$1" "$2" "$3" "${*:4}"
+    locked _join "$1"                 # link the sender here as a local send would, so the reply can wake it
     ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new -- "$host" "~/.telex/telex _recv $(sq "$1") $(sq "$(id -un)") $(sq "$2") $(sq "$3") $(sq "${*:4}")" \
       || echo "Couldn't reach $host; not sent."
     exit 0 ;;
@@ -190,6 +191,7 @@ case "$cmd" in
     rmdir "$DIR/skill" "$DIR/pi" "$DIR" 2>/dev/null
     echo "telex removed."; exit 0 ;;
 
+  _join) register "$1" ;;
   _send)                              # args: recipient, its session id, the line, sender. Skip the wake only while a queued Codex notice
                                       # (under 10 minutes old) still covers mail that was already waiting; a Claude wake checks its lock
     register "$4" "${5:-}"

@@ -248,6 +248,13 @@ onB "$B" read ben >/dev/null; "$C" send zed ben@m2host hi x >/dev/null          
 out="$("$C" send ann zed@m2host loop x)"
 check "a recipient that lives elsewhere is refused, nothing stored, no forwarding" \
   "$(echo "$out" | grep -c 'zed is not on this machine')/$(grep -c '"to":"zed"' "$M2/.telex/telex.jsonl")" "1/0"
+# a sender that only ever sent (never read) must still be woken by the reply
+: > "$FAKE_LOG"; echo S-NEW > "$HOME/stopped"; onB "$B" read ben >/dev/null
+CLAUDE_CODE_SESSION_ID=S-NEW "$C" send newbie ben@m2host hello x >/dev/null
+out="$(onB env CLAUDE_CODE_SESSION_ID=S-BEN "$B" send ben newbie 'Re: hello' back)"; sleep 1.5
+check "a sender that only sent is linked, and the reply wakes it" \
+  "$(echo "$out" | grep -c 'new name')/$(grep -c -- '--resume S-NEW' "$FAKE_LOG")" "0/1"
+: > "$HOME/stopped"; : > "$FAKE_LOG"
 
 touch "$HOME/telex" "$HOME/.lock"
 check "uninstall refuses TELEX_DIR of / or home" "$(TELEX_DIR=/ "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$(TELEX_DIR="$HOME/" "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$([ -e "$HOME/telex" ] && echo kept)" "1/1/kept"
