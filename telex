@@ -192,7 +192,7 @@ case "$cmd" in
     echo "telex removed."; exit 0 ;;
 
   _join) register "$1" ;;
-  _send)                              # args: recipient, its session id, the line, sender. Skip the wake only while a queued Codex notice
+  _send)                              # args: recipient, its session id, the line, sender, [its ssh route]. Skip the wake only while a queued Codex notice
                                       # (under 10 minutes old) still covers mail that was already waiting; a Claude wake checks its lock
     register "$4" "${5:-}"
     { [ -z "$(find "$DIR/.wake-$2" -mmin -10 2>/dev/null)" ] || [ "$(unread_n "$1")" -eq 0 ]; } && echo wake

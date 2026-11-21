@@ -225,7 +225,7 @@ shift; env HOME="$dest" TELEX_DIR="$dest/.telex" SSH_CONNECTION="$ip 5555 10.0.0
 EOF
 chmod +x "$T/bin/ssh"
 B="$M2/.telex/telex"; onB() { env HOME="$M2" TELEX_DIR="$M2/.telex" "$@"; }
-route() { jq -R -r --arg n "$2" 'fromjson? | select(.subject == "join" and .from == $n) | .body' "$1/telex.jsonl" | tail -1; }
+route() { LOG="$1/telex.jsonl" rows "select(.subject == \"join\" and .from == \"$2\") | .body" | tail -1; }
 CLAUDE_CODE_SESSION_ID=S-ANN "$C" read ann >/dev/null; onB env CLAUDE_CODE_SESSION_ID=S-BEN "$B" read ben >/dev/null
 out="$("$C" send ann ben@m2host hello 'first')"; got="$(onB "$B" read ben)"
 check "first contact by name@host arrives, and the sender's route is kept there" \
@@ -237,7 +237,7 @@ check "a reply to a plain name routes back, even from an ssh shell, and keeps it
 check "a plain name linked by ssh routes without name@host" "$(onB "$B" read ben | grep -c '^third$')" "1"
 "$C" send ann ben@m2host quoting "it's \"q\" \$HOME \`id\` ; & * ünï
 second line" >/dev/null
-check "tricky bodies cross intact" "$(jq -R -r 'fromjson? | select(.subject == "quoting") | .body' "$M2/.telex/telex.jsonl")" "it's \"q\" \$HOME \`id\` ; & * ünï
+check "tricky bodies cross intact" "$(LOG="$M2/.telex/telex.jsonl" rows 'select(.subject == "quoting") | .body')" "it's \"q\" \$HOME \`id\` ; & * ünï
 second line"
 onB "$B" read ben >/dev/null
 out="$("$C" send ann ben@nowhere hi x 2>/dev/null)"
