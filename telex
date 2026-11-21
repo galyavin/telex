@@ -76,8 +76,8 @@ status_of() {                      # idle, busy, waiting, stopped (not listed) o
 wake_codex() {                     # the .wake file marks a notice already queued: Codex has no lock to tell us
   local name="$1" sid="$2" cx err; cx="$(command -v codex || echo /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex)"
   env -u CLAUDE_CODE_SESSION_ID -u PI_SESSION_ID "$cx" app-server daemon start >/dev/null 2>&1   # an unloaded thread resumes only through this daemon (safe to start twice); its threads inherit this env, so no session ids
-  err="$("$cx" queue --thread "$sid" --message "$(notice "$name")" --resume 2>&1 >/dev/null)" && [ -z "$err" ] && touch "$DIR/.wake-$sid" \
-    || echo "Could not wake $name in Codex; the mail waits."   # a queued-but-not-resumed message warns on stderr yet exits 0
+  err="$("$cx" queue --thread "$sid" --message "$(notice "$name")" --resume 2>&1 >/dev/null)" && [[ -z "$err" || "$err" == *"active writer"* ]] && touch "$DIR/.wake-$sid" \
+    || echo "Could not wake $name in Codex; the mail waits."   # a queued-but-not-resumed message warns on stderr yet exits 0; "active writer" = an open app thread runs it itself
 }
 wake_claude() {                    # a stopped Claude session gets headless turns until its mail is read; success = they started
   local name="$1" sid="$2" cl cwd self
