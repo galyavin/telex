@@ -119,13 +119,16 @@ case "$cmd" in
     [ -n "$host" ] || { link="$(session_of "$2")"; [[ "$link" == ssh:* ]] && host="${link#ssh:}"; }
     [ -n "$host" ] || deliver "$1" "$2" "$3" "${*:4}"
     locked _join "$1"                 # link the sender here as a local send would, so the reply can wake it
-    ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new -- "$host" "~/.telex/telex _recv $(jq -rn --arg a "$1" --arg u "$(id -un)" --arg t "$2" --arg s "$3" --arg b "${*:4}" '[$a,$u,$t,$s,$b] | @sh')" \
-      || echo "Couldn't reach $host; not sent."
+    { err="$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new -- "$host" "~/.telex/telex _recv $(jq -rn --arg a "$1" --arg u "$(id -un)" --arg t "$2" --arg s "$3" --arg b "${*:4}" '[$a,$u,$t,$s,$b] | @sh')" 2>&1 >&3)"; } 3>&1 && { [ -z "$err" ] || echo "$err" >&2; } \
+      || echo "Couldn't reach $host; not sent. (${err%%$'\n'*}) Set up key login with: ssh-copy-id $host"      # ssh's own words say why
     exit 0 ;;
   _recv)                              # args from the other machine: sender, its user, recipient, subject, body. Never forwards.
     PATH="$HOME/.local/bin:$PATH"     # ssh starts us with a bare PATH, and the wake must find claude and codex
     [ $# -eq 5 ] || exit 1; valid "$1"; valid "$2"; valid "$3"; room
-    deliver "$1" "$3" "$4" "$5" "ssh:$2@${SSH_CONNECTION%% *}" ;;
+    route="ssh:$2@${SSH_CONNECTION%% *}"       # first contact from this route: can we run telex on the sender? replies need it
+    [ "$(session_of "$1")" = "$route" ] || { ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=3 -- "${route#ssh:}" '~/.telex/telex _recv' >/dev/null 2>&1; [ $? -eq 1 ] \
+      || echo "Note: replies to you will fail: this machine can't run telex on you over ssh (set up key login from here to you: ssh-copy-id ${route#ssh:})."; }
+    deliver "$1" "$3" "$4" "$5" "$route" ;;
   read)
     [ $# -eq 1 ] || usage; set -- "$(lower "$1")"; valid "$1"; room
     locked _read "$1" ;;

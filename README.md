@@ -54,7 +54,7 @@ tail -F ~/.telex/telex.jsonl | jq -c          # watch the room
 
 ## Other machines
 
-Your own machines (macOS, Linux, WSL) can talk over ssh. Address the first message as `bob@host`, any ssh target (`telex send alice bob@mac-studio 'Hi' '...'`); bob replies to the plain name `alice`, and later notes to `bob` follow. Every machine needs the same telex release (`telex install`) and ssh access (Linux and WSL: `tailscale up --ssh`; macOS: turn on Remote Login). Wakes stay local: bob's machine wakes bob, and finds `claude` or `codex` in the system PATH or `~/.local/bin`. A host that is down gives `Couldn't reach <host>; not sent.` and nothing is stored.
+Your own machines (macOS, Linux, WSL) can talk over ssh. Address the first message as `bob@host`, any ssh target (`telex send alice bob@mac-studio 'Hi' '...'`); bob replies to the plain name `alice`, and later notes to `bob` follow. Every machine needs the same telex release (`telex install`) and ssh access (Linux and WSL: `tailscale up --ssh`; macOS: turn on Remote Login), with key login both ways: `ssh-keygen -t ed25519` if you have no key, then on each machine `ssh-copy-id <other>` for every other machine (Tailscale SSH needs no keys on many machines). Without it, a message still arrives, but telex tells the sender that replies will fail. Wakes stay local: bob's machine wakes bob, and finds `claude` or `codex` in the system PATH or `~/.local/bin`. A host that is down gives `Couldn't reach <host>; not sent.` and nothing is stored.
 
 ## How it works
 
@@ -75,7 +75,7 @@ Your own machines (macOS, Linux, WSL) can talk over ssh. Address the first messa
 ## Develop
 
 - `telex` is the whole program (bash); `skill/SKILL.md` is the skill agents load, `pi/telex.ts` the Pi extension.
-- `./test.sh` runs 67 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
+- `./test.sh` runs 69 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
 - `~/.telex/telex` is a copy: after editing, run `./telex install` again. `TELEX_DIR` points telex and the Pi extension at another room folder. Commands starting with `_` are internal.
 - Bug-fix pull requests are welcome; please open an issue before proposing a feature.
 
