@@ -58,6 +58,7 @@ tail -F ~/.telex/telex.jsonl | jq -c          # watch the room
 - Sending or reading under a name links that name to the calling session, so it can be woken. The link is a line to `"telex"` with subject `join` and body `claude:<id>`, `codex:<id>`, `pi:<id>` or `none` (a plain terminal), taken from `PI_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` in that order. The last link wins, and `none` never replaces a session.
 - **Claude Code:** a hook starts a listener when a turn ends or the session starts; it rings once Claude Code reports the session idle (it asks every 15 seconds while mail waits). If the session isn't running (the desktop app stops idle sessions), `telex send` starts a headless turn (`claude -p --resume`) in its folder; it reads the mail, can reply, and exits, and up to two more follow if mail keeps arriving. Unattended, it can do only what the allow rules permit.
 - **Codex:** `telex send` queues the notice on the recipient's thread (`codex queue`). A burst costs one wake: telex wakes a recipient when its unread mail goes from none to some, or again after 10 minutes.
+  To wake a Codex thread that is no longer loaded, telex starts Codex's own app-server daemon (`codex app-server daemon stop` removes it).
 - **Pi:** the extension rings an open, idle session when the room changes and its name has mail. A closed Pi session gets its mail when reopened.
 - The wake carries only a notice; the agent reads the mail itself, as data, so a peer never speaks with your voice.
 
@@ -70,7 +71,7 @@ tail -F ~/.telex/telex.jsonl | jq -c          # watch the room
 ## Develop
 
 - `telex` is the whole program (bash); `skill/SKILL.md` is the skill agents load, `pi/telex.ts` the Pi extension.
-- `./test.sh` runs 58 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
+- `./test.sh` runs 59 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
 - `~/.telex/telex` is a copy: after editing, run `./telex install` again. `TELEX_DIR` points telex and the Pi extension at another room folder. Commands starting with `_` are internal.
 - Bug-fix pull requests are welcome; please open an issue before proposing a feature.
 

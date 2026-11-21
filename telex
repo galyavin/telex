@@ -74,9 +74,10 @@ status_of() {                      # idle, busy, waiting, stopped (not listed) o
     | jq -r --arg s "$1" 'select(type == "array") | first(.[] | select(.sessionId == $s) | .status // "idle") // "stopped"' 2>/dev/null \
     | grep . || echo unknown; }                  # anything but a real session list prints nothing, which reads as unknown
 wake_codex() {                     # the .wake file marks a notice already queued: Codex has no lock to tell us
-  local name="$1" sid="$2" cx; cx="$(command -v codex || echo /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex)"
-  "$cx" queue --thread "$sid" --message "$(notice "$name")" --resume >/dev/null 2>&1 && touch "$DIR/.wake-$sid" \
-    || echo "Could not wake $name in Codex; it will see the mail when it next reads. Do not send again."
+  local name="$1" sid="$2" cx err; cx="$(command -v codex || echo /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex)"
+  "$cx" app-server daemon start >/dev/null 2>&1     # Codex resumes an unloaded thread only through this daemon; starting it twice is harmless
+  err="$("$cx" queue --thread "$sid" --message "$(notice "$name")" --resume 2>&1 >/dev/null)" && [ -z "$err" ] && touch "$DIR/.wake-$sid" \
+    || echo "Could not wake $name in Codex; the mail waits."   # a queued-but-not-resumed message warns on stderr yet exits 0
 }
 wake_claude() {                    # a stopped Claude session gets headless turns until its mail is read; success = they started
   local name="$1" sid="$2" cl cwd self
