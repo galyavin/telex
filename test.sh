@@ -215,7 +215,7 @@ check "headless turn finds telex through ~/.local/bin" "$(grep -c 'Run: telex re
 : > "$HOME/stopped"; : > "$FAKE_LOG"
 
 # two machines over ssh. The fake ssh runs the other machine's telex (own HOME and room) with SSH_CONNECTION set to the caller's address
-export M1="$HOME" M2="$T/m2"; mkdir -p "$M2/.telex"; cp "$SRC/telex" "$M2/.telex/telex"; cp "$SRC/telex" "$TELEX_DIR/telex"
+export M1="$HOME" M2="$T/m2"; mkdir -p "$M2/.telex"; cp "$SRC/telex" "$M2/.telex/telex"
 cat > "$T/bin/ssh" <<'EOF'
 #!/bin/sh
 while :; do case "$1" in -o) shift 2 ;; -n) shift ;; --) shift; break ;; *) break ;; esac; done
@@ -226,11 +226,11 @@ EOF
 chmod +x "$T/bin/ssh"
 B="$M2/.telex/telex"; onB() { env HOME="$M2" TELEX_DIR="$M2/.telex" "$@"; }
 route() { LOG="$1/telex.jsonl" rows "select(.subject == \"join\" and .from == \"$2\") | .body" | tail -1; }
-CLAUDE_CODE_SESSION_ID=S-ANN "$C" read ann >/dev/null; onB env CLAUDE_CODE_SESSION_ID=S-BEN "$B" read ben >/dev/null
+CLAUDE_CODE_SESSION_ID=S-ANN "$C" read ann >/dev/null; onB CLAUDE_CODE_SESSION_ID=S-BEN "$B" read ben >/dev/null
 out="$("$C" send ann ben@m2host hello 'first')"; got="$(onB "$B" read ben)"
 check "first contact by name@host arrives, and the sender's route is kept there" \
   "$(echo "$out" | grep -c 'Sent to ben')/$(echo "$got" | grep -c '^first$')/$(echo "$got" | grep -c 'from ann')/$(route "$M2/.telex" ann)" "1/1/1/ssh:$(id -un)@100.64.0.1"
-onB env CLAUDE_CODE_SESSION_ID=S-BEN SSH_CONNECTION="1.2.3.4 1 5.6.7.8 22" "$B" send ben ann 'Re: hello' 'second' >/dev/null
+onB CLAUDE_CODE_SESSION_ID=S-BEN SSH_CONNECTION="1.2.3.4 1 5.6.7.8 22" "$B" send ben ann 'Re: hello' 'second' >/dev/null
 check "a reply to a plain name routes back, even from an ssh shell, and keeps its route" \
   "$("$C" read ann | grep -c '^second$')/$(route "$M1/.telex" ben)" "1/ssh:$(id -un)@100.64.0.2"
 "$C" send ann ben 'plain again' 'third' >/dev/null
@@ -251,7 +251,7 @@ check "a recipient that lives elsewhere is refused, nothing stored, no forwardin
 # a sender that only ever sent (never read) must still be woken by the reply
 : > "$FAKE_LOG"; echo S-NEW > "$HOME/stopped"; onB "$B" read ben >/dev/null
 CLAUDE_CODE_SESSION_ID=S-NEW "$C" send newbie ben@m2host hello x >/dev/null
-out="$(onB env CLAUDE_CODE_SESSION_ID=S-BEN "$B" send ben newbie 'Re: hello' back)"; sleep 1.5
+out="$(onB CLAUDE_CODE_SESSION_ID=S-BEN "$B" send ben newbie 'Re: hello' back)"; sleep 1.5
 check "a sender that only sent is linked, and the reply wakes it" \
   "$(echo "$out" | grep -c 'new name')/$(grep -c -- '--resume S-NEW' "$FAKE_LOG")" "0/1"
 : > "$HOME/stopped"; : > "$FAKE_LOG"
