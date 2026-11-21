@@ -214,6 +214,41 @@ CLAUDE_CODE_SESSION_ID=S-LNK "$C" read nl5 >/dev/null; echo S-LNK > "$HOME/stopp
 check "headless turn finds telex through ~/.local/bin" "$(grep -c 'Run: telex read nl5' "$HOME/wakes")/$(unread nl5)" "1/0"
 : > "$HOME/stopped"; : > "$FAKE_LOG"
 
+# two machines over ssh. The fake ssh runs the other machine's telex (own HOME and room) with SSH_CONNECTION set to the caller's address
+export M1="$HOME" M2="$T/m2"; mkdir -p "$M2/.telex"; cp "$SRC/telex" "$M2/.telex/telex"; cp "$SRC/telex" "$TELEX_DIR/telex"
+cat > "$T/bin/ssh" <<'EOF'
+#!/bin/sh
+while :; do case "$1" in -o) shift 2 ;; -n) shift ;; --) shift; break ;; *) break ;; esac; done
+case "${1##*@}" in m2host|100.64.0.2) dest="$M2"; ip=100.64.0.1 ;; 100.64.0.1) dest="$M1"; ip=100.64.0.2 ;;
+  *) echo "ssh: Could not resolve hostname ${1##*@}" >&2; exit 255 ;; esac
+shift; env HOME="$dest" TELEX_DIR="$dest/.telex" SSH_CONNECTION="$ip 5555 10.0.0.9 22" sh -c "$*"
+EOF
+chmod +x "$T/bin/ssh"
+B="$M2/.telex/telex"; onB() { env HOME="$M2" TELEX_DIR="$M2/.telex" "$@"; }
+route() { jq -R -r --arg n "$2" 'fromjson? | select(.subject == "join" and .from == $n) | .body' "$1/telex.jsonl" | tail -1; }
+CLAUDE_CODE_SESSION_ID=S-ANN "$C" read ann >/dev/null; onB env CLAUDE_CODE_SESSION_ID=S-BEN "$B" read ben >/dev/null
+out="$("$C" send ann ben@m2host hello 'first')"; got="$(onB "$B" read ben)"
+check "first contact by name@host arrives, and the sender's route is kept there" \
+  "$(echo "$out" | grep -c 'Sent to ben')/$(echo "$got" | grep -c '^first$')/$(echo "$got" | grep -c 'from ann')/$(route "$M2/.telex" ann)" "1/1/1/ssh:$(id -un)@100.64.0.1"
+onB env CLAUDE_CODE_SESSION_ID=S-BEN SSH_CONNECTION="1.2.3.4 1 5.6.7.8 22" "$B" send ben ann 'Re: hello' 'second' >/dev/null
+check "a reply to a plain name routes back, even from an ssh shell, and keeps its route" \
+  "$("$C" read ann | grep -c '^second$')/$(route "$M1/.telex" ben)" "1/ssh:$(id -un)@100.64.0.2"
+"$C" send ann ben 'plain again' 'third' >/dev/null
+check "a plain name linked by ssh routes without name@host" "$(onB "$B" read ben | grep -c '^third$')" "1"
+"$C" send ann ben@m2host quoting "it's \"q\" \$HOME \`id\` ; & * ünï
+second line" >/dev/null
+check "tricky bodies cross intact" "$(jq -R -r 'fromjson? | select(.subject == "quoting") | .body' "$M2/.telex/telex.jsonl")" "it's \"q\" \$HOME \`id\` ; & * ünï
+second line"
+onB "$B" read ben >/dev/null
+out="$("$C" send ann ben@nowhere hi x 2>/dev/null)"
+check "an unreachable host says so and stores nothing" "$(echo "$out" | grep -c "Couldn't reach nowhere; not sent")/$(grep -c '"to":"ben"' "$LOG")" "1/0"
+"$C" send ann ben@someoneelse@m2host user check >/dev/null
+check "the route uses the sender's own user, not the one typed in the target" "$(route "$M2/.telex" ann)" "ssh:$(id -un)@100.64.0.1"
+onB "$B" read ben >/dev/null; "$C" send zed ben@m2host hi x >/dev/null          # now zed is a route on the other machine
+out="$("$C" send ann zed@m2host loop x)"
+check "a recipient that lives elsewhere is refused, nothing stored, no forwarding" \
+  "$(echo "$out" | grep -c 'zed is not on this machine')/$(grep -c '"to":"zed"' "$M2/.telex/telex.jsonl")" "1/0"
+
 touch "$HOME/telex" "$HOME/.lock"
 check "uninstall refuses TELEX_DIR of / or home" "$(TELEX_DIR=/ "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$(TELEX_DIR="$HOME/" "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$([ -e "$HOME/telex" ] && echo kept)" "1/1/kept"
 rm -f "$HOME/telex" "$HOME/.lock"

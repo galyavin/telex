@@ -52,10 +52,14 @@ telex read user
 tail -F ~/.telex/telex.jsonl | jq -c          # watch the room
 ```
 
+## Other machines
+
+Your own machines (macOS, Linux, WSL) can talk over ssh. Address the first message as `bob@host`, any ssh target (`telex send alice bob@mac-studio 'Hi' '...'`); bob replies to the plain name `alice`, and later notes to `bob` follow. Every machine needs the same telex release (`telex install`) and ssh access (Linux and WSL: `tailscale up --ssh`; macOS: turn on Remote Login). Wakes stay local: bob's machine wakes bob, and finds `claude` or `codex` in the system PATH or `~/.local/bin`. A host that is down gives `Couldn't reach <host>; not sent.` and nothing is stored.
+
 ## How it works
 
 - `~/.telex/telex.jsonl` holds everything. Every line is `{ts, from, to, subject, body}`. Read mail is deleted, so the file stays small; a read shows up to about 12 KB and tells the agent to read again for the rest.
-- Sending or reading under a name links that name to the calling session, so it can be woken. The link is a line to `"telex"` with subject `join` and body `claude:<id>`, `codex:<id>`, `pi:<id>` or `none` (a plain terminal), taken from `PI_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` in that order. The last link wins, and `none` never replaces a session.
+- Sending or reading under a name links that name to the calling session, so it can be woken. The link is a line to `"telex"` with subject `join` and body `claude:<id>`, `codex:<id>`, `pi:<id>`, `ssh:<user>@<ip>` (a sender on another machine) or `none` (a plain terminal), taken from `PI_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` in that order. The last link wins, and `none` never replaces a session.
 - **Claude Code:** a hook starts a listener when a turn ends or the session starts; it rings once Claude Code reports the session idle (it asks every 15 seconds while mail waits). If the session isn't running (the desktop app stops idle sessions), `telex send` starts a headless turn (`claude -p --resume`) in its folder; it reads the mail, can reply, and exits, and up to two more follow if mail keeps arriving. Unattended, it can do only what the allow rules permit.
 - **Codex:** `telex send` queues the notice on the recipient's thread (`codex queue`). A burst costs one wake: telex wakes a recipient when its unread mail goes from none to some, or again after 10 minutes.
   To wake a Codex thread that is no longer loaded, telex starts Codex's own app-server daemon (`codex app-server daemon stop` removes it).
@@ -66,12 +70,12 @@ tail -F ~/.telex/telex.jsonl | jq -c          # watch the room
 
 - Without the one-time Claude CLI sign-in, a stopped Claude session can't be reached; `telex send` says so, and the mail waits until it runs again.
 - Agents in other harnesses can send and read if they can run shell commands, but nothing wakes them.
-- No history, and no authentication: anyone who can write `~/.telex` can post as anyone. telex is for agents you already trust on your own machine.
+- No history, and no authentication: anyone who can write `~/.telex`, or ssh in as you, can post as anyone. telex is for agents you already trust on your own machine.
 
 ## Develop
 
 - `telex` is the whole program (bash); `skill/SKILL.md` is the skill agents load, `pi/telex.ts` the Pi extension.
-- `./test.sh` runs 59 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
+- `./test.sh` runs 66 checks in about 25 seconds, in a throwaway `HOME` against fake `claude` and `codex` commands; it touches neither your real `~/.telex` nor any model.
 - `~/.telex/telex` is a copy: after editing, run `./telex install` again. `TELEX_DIR` points telex and the Pi extension at another room folder. Commands starting with `_` are internal.
 - Bug-fix pull requests are welcome; please open an issue before proposing a feature.
 
