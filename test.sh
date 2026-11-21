@@ -135,6 +135,9 @@ printf '{"cwd":"%s"}\n{"cwd":"%s"}\n' "$T/moved-away" "$T/proj" > "$HOME/.claude
 CLAUDE_CODE_SESSION_ID=S-MV "$C" read mvx >/dev/null; echo S-MV > "$HOME/stopped"; : > "$FAKE_LOG"
 "$C" send bob mvx hi x >/dev/null; sleep 1.5
 check "a session whose first folder is gone is woken in its last one" "$(grep -c "^$(realpath "$T/proj") session= -p --resume S-MV" "$FAKE_LOG")/$(unread mvx)" "1/0"
+mkdir -p "$T/locked"; chmod 000 "$T/locked"; echo '{"cwd":"'"$T/locked"'"}' > "$HOME/.claude/projects/p/S-LK.jsonl"
+CLAUDE_CODE_SESSION_ID=S-LK "$C" read lkx >/dev/null; echo S-LK > "$HOME/stopped"; out="$("$C" send bob lkx hi x 2>/dev/null)"; chmod 755 "$T/locked"
+check "a drive that cannot start is not reported as started" "$(echo "$out" | grep -c 'Could not wake lkx')/$(echo "$out" | grep -c 'started a turn')" "1/0"
 : > "$HOME/stopped"; : > "$FAKE_LOG"
 echo S-STOP > "$HOME/stopped"; echo false > "$HOME/loggedin"
 out="$("$C" send bob sleepy nologin x)"; out="$out$("$C" send bob sleepy nologin2 x)"; sleep 0.5

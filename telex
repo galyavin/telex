@@ -93,8 +93,9 @@ wake_claude() {                    # a stopped Claude session gets headless turn
   [ -z "$cwd" ] || [ -d "$cwd" ] || { echo "Could not wake $name: its folder $cwd is gone; the mail waits."; return 1; }
   ( cd "${cwd:-$HOME}" && env -i HOME="$HOME" USER="${USER:-}" PATH="$p" TELEX_DIR="$DIR" perl -MPOSIX -e '
       pipe(R, W); if (fork) { close W; <R>; exit 0 } close R; POSIX::setsid(); close W; exec @ARGV' \
-      "${TRY[@]}" "$DIR/.listen-$sid" "$self" _drive "$sid" "$cl" </dev/null >/dev/null 2>&1 )   # returns once detached
-  echo "$name's session was stopped; started a turn for it to read this."
+      "${TRY[@]}" "$DIR/.listen-$sid" "$self" _drive "$sid" "$cl" </dev/null >/dev/null 2>&1 ) \
+    && echo "$name's session was stopped; started a turn for it to read this." \
+    || echo "Could not wake $name; the mail waits."   # the subshell returns once the drive is detached
 }
 
 cmd="${1:-}"; [ $# -ge 1 ] && shift
