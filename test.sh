@@ -247,7 +247,7 @@ check "an unreachable host says so and stores nothing" "$(echo "$out" | grep -c 
 out="$(FAKE_SSH_DOWN=m2host "$C" send ann ben@m2host hi x 2>/dev/null)"
 check "a failed ssh shows its reason and the key-login hint" "$(echo "$out" | grep -c "not sent. (ssh: Permission denied (publickey).) Set up key login with: ssh-copy-id m2host")" "1"
 a="$(FAKE_SSH_DOWN=100.64.0.1 "$C" send fc1 ben@m2host hi x)"; b="$(FAKE_SSH_DOWN=100.64.0.1 "$C" send fc1 ben@m2host hi again)"
-check "a first contact that cannot be answered over ssh gets one note, once" "$(echo "$a" | grep -c '^Note: replies to you will fail')/$(echo "$a" | grep -c 'Sent to ben')/$(echo "$b" | grep -c '^Note')" "1/1/0"
+check "a first contact that cannot be answered over ssh gets one note, once" "$(echo "$a" | grep -c "^Note: replies will fail: $(hostname -s) cannot ssh back to you. On $(hostname -s) run: ssh-copy-id $(id -un)@100.64.0.1\$")/$(echo "$a" | grep -c 'Sent to ben')/$(echo "$b" | grep -c '^Note')" "1/1/0"
 check "the route uses the sender's own user, not the one typed in the target" "$(route "$M2/.telex" ann)" "ssh:$(id -un)@100.64.0.1"
 onB "$B" read ben >/dev/null; "$C" send zed ben@m2host hi x >/dev/null          # now zed is a route on the other machine
 out="$("$C" send ann zed@m2host loop x)"
