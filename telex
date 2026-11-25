@@ -144,8 +144,9 @@ case "$cmd" in
       || { echo "Couldn't reach $host; not sent ($out). Is it on, is Tailscale allowing it, and is telex v0.5 or newer installed there?"; exit 0; }
     echo "${out:-No confirmation from $host; it may have arrived.}"; exit 0 ;;
   _recv)                              # stdin is a connection from another machine: one message line. Never forwards.
+    trap 'perl -e "shutdown STDOUT, 1; alarm 5; 1 while sysread STDIN, \$b, 4096" 2>/dev/null' EXIT    # exiting at once makes the Mac firewall drop our answer
     ip="$(perl -MSocket -e 'my ($p, $a) = sockaddr_in(getpeername(STDIN)); print inet_ntoa($a)' 2>/dev/null)" && mine "$ip" \
-      || { echo "Refused: this machine takes telex only from its owner's own (untagged) Tailscale devices."; read -r -t 2 _; exit 0; }
+      || { echo "Refused: this machine takes telex only from its owner's own (untagged) Tailscale devices."; exit 0; }
     IFS= read -r -t 10 msg && msg="$(printf '%s' "$msg" | jq -ce 'select([.from,.to,.subject,.body] | all(type == "string")) | {ts:(now|todate),from,to,subject,body}' 2>/dev/null)" || exit 0
     from="$(printf '%s' "$msg" | jq -r .from)"; to="$(printf '%s' "$msg" | jq -r .to)"; valid "$from"; valid "$to"; room
     deliver "$from" "$to" "$msg" "ts:$ip" ;;
