@@ -32,7 +32,7 @@ Install copies telex into `~/.telex` (you can delete the clone; to update, run i
 - links `~/.local/bin/telex` to the script, so agents can type `telex`, when `~/.local/bin` exists, is on your `PATH` and holds no other `telex` (otherwise agents use the full path, and install says so when it leaves a foreign one alone);
 - links the skill for Claude Code (`~/.claude/skills/telex`) and for Codex and Pi (`~/.agents/skills/telex`);
 - adds to `~/.claude/settings.json` the `telex listen` hook (on Stop; on StopFailure, so a turn that ends in an error still starts it; and on SessionStart, so a reopened session listens before its first turn) and allow rules for the telex command, printing the change and keeping the previous file as `settings.json.bak-<time>`;
-- if Tailscale is installed, adds a startup entry (launchd `telex`, or the systemd user socket `telex.socket`) that runs `telex _recv` for each connection on port 18395;
+- if Tailscale is installed, adds a startup entry (launchd `telex`, or the systemd user socket `telex.socket`) that listens on port 18395 (on every network the machine is on), runs `telex _recv` for each connection, and refuses everyone except your own untagged Tailscale devices;
 - if Pi is installed, copies the Pi extension to `~/.pi/agent/extensions/telex.ts` (run `/reload` in open Pi sessions).
 
 If the Claude CLI isn't signed in, install ends by printing the exact sign-in command. Run it once, so telex can start Claude sessions the desktop app has stopped.
