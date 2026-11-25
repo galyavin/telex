@@ -285,8 +285,9 @@ check "install starts the listener; without Tailscale it says this machine only"
 
 touch "$HOME/telex" "$HOME/.lock"
 check "uninstall refuses TELEX_DIR of / or home" "$(TELEX_DIR=/ "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$(TELEX_DIR="$HOME/" "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$([ -e "$HOME/telex" ] && echo kept)" "1/1/kept"
-rm -f "$HOME/telex" "$HOME/.lock"
+rm -f "$HOME/telex" "$HOME/.lock"; : > "$T/svc"
 "$C" uninstall >/dev/null
+check "uninstall stops the listener" "$(grep -cE '^(launchctl bootout gui/[0-9]+/telex|systemctl --user disable -q --now telex.socket)$' "$T/svc")" "1"
 check "uninstall removes our link" "$([ -e "$LB/telex" ] || [ -L "$LB/telex" ] || echo gone)" "gone"
 printf '#!/bin/sh\necho foreign\n' > "$LB/telex"; chmod +x "$LB/telex"; "$C" uninstall >/dev/null
 check "uninstall leaves a foreign telex" "$("$LB/telex")" "foreign"
