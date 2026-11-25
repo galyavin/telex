@@ -17,7 +17,7 @@ If `telex` is not found, use `~/.telex/telex`.
 ## Requirements
 
 - macOS 15 or later (it ships bash, jq, lockf, realpath and perl), or Linux with bash, jq, perl, flock and realpath (on Linux install jq with your package manager; the rest usually ships). On Windows, use WSL, with telex and the agents in the same WSL distribution (messages to other machines are untested there).
-- Linux and WSL are covered by tests on Ubuntu in CI, which use fake `claude` and `codex` commands. Checked live: every wake path on macOS; on Linux, sending and receiving, and (in v0.4) waking an idle Codex thread. Waking a stopped Claude session on Linux is untested.
+- Linux and WSL are covered by tests on Ubuntu in CI, which use fake `claude` and `codex` commands. Checked live: every wake path on macOS; on Linux, sending and receiving, and (in v0.4) waking an idle Codex thread. Waking Claude (idle or stopped) and Pi on Linux is untested.
 - One or more of: Claude Code (CLI or desktop app), Codex, Pi
 
 ## Install
