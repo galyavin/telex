@@ -31,6 +31,16 @@ case "$1" in
 esac
 EOF
 printf '#!/bin/sh\n[ "$1" = app-server ] && { echo "${CLAUDE_CODE_SESSION_ID:-none}" > "$HOME/daemon-env"; exit 0; }\necho push >> "$HOME/pushes"; [ -z "${FAKE_CODEX_WARN:-}" ] || echo "Warning: queued, but could not resume: $FAKE_CODEX_WARN" >&2; exit ${FAKE_CODEX_RC:-1}\n' > "$T/bin/codex"; chmod +x "$T/bin/claude" "$T/bin/codex"
+# fake tailscale: this machine is 127.0.0.2, the other one ("m2host") 127.0.0.1, "theirs" is someone else's. Fake service managers only log.
+cat > "$T/bin/tailscale" <<EOF
+#!/bin/sh
+[ -f "$T/ts-off" ] && exit 1
+case "\$1 \$2" in "ip -4") case "\$3" in "") echo 127.0.0.2 ;; m2host|127.0.0.1) echo 127.0.0.1 ;; theirs) echo 127.0.0.9 ;; *) exit 1 ;; esac ;;
+  "whois --json") if [ "\$3" = 127.0.0.9 ]; then echo '{"Node":{},"UserProfile":{"LoginName":"other@x"}}'
+    elif [ "\$3" = 127.0.0.1 ] && [ "\$HOME" = "$T/m2" ] && [ -f "$T/whois" ]; then cat "$T/whois"
+    else echo '{"Node":{},"UserProfile":{"LoginName":"me@x"}}'; fi ;; esac
+EOF
+printf '#!/bin/sh\necho "$(basename "$0") $*" >> "%s/svc"\n' "$T" | tee "$T/bin/launchctl" > "$T/bin/systemctl"; chmod +x "$T/bin/"*
 export PATH="$T/bin:$PATH"
 
 # install from a download that is then deleted (uninstall at the end must give back these settings exactly)
@@ -214,52 +224,64 @@ CLAUDE_CODE_SESSION_ID=S-LNK "$C" read nl5 >/dev/null; echo S-LNK > "$HOME/stopp
 check "headless turn finds telex through ~/.local/bin" "$(grep -c 'Run: telex read nl5' "$HOME/wakes")/$(unread nl5)" "1/0"
 : > "$HOME/stopped"; : > "$FAKE_LOG"
 
-# two machines over ssh. The fake ssh runs the other machine's telex (own HOME and room) with SSH_CONNECTION set to the caller's address
-export M1="$HOME" M2="$T/m2"; mkdir -p "$M2/.telex"; cp "$SRC/telex" "$M2/.telex/telex"
-cat > "$T/bin/ssh" <<'EOF'
-#!/bin/sh
-while :; do case "$1" in -o) shift 2 ;; -n) shift ;; --) shift; break ;; *) break ;; esac; done
-[ "${1##*@}" = "${FAKE_SSH_DOWN:-}" ] && { echo "ssh: Permission denied (publickey)." >&2; exit 255; }
-case "${1##*@}" in m2host|100.64.0.2) dest="$M2"; ip=100.64.0.1 ;; 100.64.0.1) dest="$M1"; ip=100.64.0.2 ;;
-  *) echo "ssh: Could not resolve hostname ${1##*@}" >&2; exit 255 ;; esac
-shift; env HOME="$dest" TELEX_DIR="$dest/.telex" SSH_CONNECTION="$ip 5555 10.0.0.9 22" sh -c "$*"
-EOF
-chmod +x "$T/bin/ssh"
-B="$M2/.telex/telex"; onB() { env HOME="$M2" TELEX_DIR="$M2/.telex" "$@"; }
+# two machines over Tailscale: each has its own HOME, room and port, and a small server runs `_recv` per connection as launchd and systemd do
+export M1="$HOME" M2="$T/m2"; mkdir -p "$M2/.telex"; B="$M2/.telex/telex"; A="$T/a-telex"
+read -r P1 P2 P3 < <(perl -MIO::Socket::INET -e 'my @s = map { IO::Socket::INET->new(LocalAddr => "127.0.0.1", Listen => 1) } 1..3; print join(" ", map { $_->sockport } @s), "\n"')
+port() { sed "s/^PORT=[0-9]*/PORT=$1/" "$SRC/telex" > "$2"; chmod +x "$2"; }
+port "$P2" "$A"; port "$P1" "$B"                    # each sends to the other's port
+serve() { perl -MIO::Socket::INET -e 'my $p = shift; $SIG{CHLD} = "IGNORE"; my $s = IO::Socket::INET->new(LocalAddr => "127.0.0.1", LocalPort => $p, Listen => 9, ReuseAddr => 1) or die;
+  while (my $c = $s->accept) { next if fork; close $s; open STDIN, "<&", $c; open STDOUT, ">&", $c; open STDERR, ">&", $c; close $c; exec @ARGV }' "$@" & srv="${srv:-} $!"; disown; }
+serve "$P1" env HOME="$M1" TELEX_DIR="$M1/.telex" /bin/bash "$A" _recv
+serve "$P2" env HOME="$M2" TELEX_DIR="$M2/.telex" /bin/bash "$B" _recv
+trap 'kill $srv 2>/dev/null; rm -rf "$T"' EXIT; sleep 0.5
+onB() { env HOME="$M2" TELEX_DIR="$M2/.telex" "$@"; }
 route() { LOG="$1/telex.jsonl" rows "select(.subject == \"join\" and .from == \"$2\") | .body" | tail -1; }
-CLAUDE_CODE_SESSION_ID=S-ANN "$C" read ann >/dev/null; onB CLAUDE_CODE_SESSION_ID=S-BEN "$B" read ben >/dev/null
-out="$("$C" send ann ben@m2host hello 'first')"; got="$(onB "$B" read ben)"
-check "first contact by name@host arrives, and the sender's route is kept there" \
-  "$(echo "$out" | grep -c 'Sent to ben')/$(echo "$got" | grep -c '^first$')/$(echo "$got" | grep -c 'from ann')/$(route "$M2/.telex" ann)" "1/1/1/ssh:$(id -un)@100.64.0.1"
-onB CLAUDE_CODE_SESSION_ID=S-BEN SSH_CONNECTION="1.2.3.4 1 5.6.7.8 22" "$B" send ben ann 'Re: hello' 'second' >/dev/null
-check "a reply to a plain name routes back, even from an ssh shell, and keeps its route" \
-  "$("$C" read ann | grep -c '^second$')/$(route "$M1/.telex" ben)" "1/ssh:$(id -un)@100.64.0.2"
-"$C" send ann ben 'plain again' 'third' >/dev/null
-check "a plain name linked by ssh routes without name@host" "$(onB "$B" read ben | grep -c '^third$')" "1"
-"$C" send ann ben@m2host quoting "it's \"q\" \$HOME \`id\` ; & * ünï
+raw() { perl -MIO::Socket::INET -e '$SIG{PIPE} = "IGNORE"; my $s = IO::Socket::INET->new("127.0.0.1:$ARGV[0]") or die; print $s $ARGV[1]; shutdown $s, 1; print while <$s>' "$@"; }
+CLAUDE_CODE_SESSION_ID=S-ANN "$A" read ann >/dev/null; onB CLAUDE_CODE_SESSION_ID=S-BEN "$B" read ben >/dev/null
+out="$("$A" send ann ben@m2host hello 'first')"; got="$(onB "$B" read ben)"
+check "first contact by name@host arrives, and the sender's machine is kept there" \
+  "$(echo "$out" | grep -c 'Sent to ben')/$(echo "$got" | grep -c '^first$')/$(echo "$got" | grep -c 'from ann')/$(route "$M2/.telex" ann)" "1/1/1/ts:127.0.0.1"
+onB CLAUDE_CODE_SESSION_ID=S-BEN "$B" send ben ann 'Re: hello' 'second' >/dev/null
+check "a reply to a plain name goes back to its machine" "$("$A" read ann | grep -c '^second$')/$(route "$M1/.telex" ben)" "1/ts:127.0.0.1"
+"$A" send ann ben 'plain again' 'third' >/dev/null
+check "a plain name linked to another machine needs no name@host" "$(onB "$B" read ben | grep -c '^third$')" "1"
+"$A" send ann ben@m2host quoting "it's \"q\" \$HOME \`id\` ; & * ünï
 second line" >/dev/null
 check "tricky bodies cross intact" "$(LOG="$M2/.telex/telex.jsonl" rows 'select(.subject == "quoting") | .body')" "it's \"q\" \$HOME \`id\` ; & * ünï
 second line"
-onB "$B" read ben >/dev/null
-out="$("$C" send ann ben@nowhere hi x 2>/dev/null)"
-check "an unreachable host says so and stores nothing" "$(echo "$out" | grep -c "Couldn't reach nowhere; not sent")/$(grep -c '"to":"ben"' "$LOG")" "1/0"
-"$C" send ann ben@someoneelse@m2host user check >/dev/null
-out="$(FAKE_SSH_DOWN=m2host "$C" send ann ben@m2host hi x 2>/dev/null)"
-check "a failed ssh shows its reason and the key-login hint" "$(echo "$out" | grep -c "not sent. (ssh: Permission denied (publickey).) Set up key login with: ssh-copy-id m2host")" "1"
-a="$(FAKE_SSH_DOWN=100.64.0.1 "$C" send fc1 ben@m2host hi x)"; b="$(FAKE_SSH_DOWN=100.64.0.1 "$C" send fc1 ben@m2host hi again)"
-check "a first contact that cannot be answered over ssh gets one note, once" "$(echo "$a" | grep -c "^Note: replies will fail: $(hostname -s) cannot ssh back to you. On $(hostname -s) run: ssh-copy-id $(id -un)@100.64.0.1 (no ssh key there yet? see the README, Other machines)\$")/$(echo "$a" | grep -c 'Sent to ben')/$(echo "$b" | grep -c '^Note')" "1/1/0"
-check "the route uses the sender's own user, not the one typed in the target" "$(route "$M2/.telex" ann)" "ssh:$(id -un)@100.64.0.1"
-onB "$B" read ben >/dev/null; "$C" send zed ben@m2host hi x >/dev/null          # now zed is a route on the other machine
-out="$("$C" send ann zed@m2host loop x)"
+echo '{"from":"olga","to":"telex","subject":"join","body":"ssh:someone@127.0.0.1"}' >> "$LOG"; "$A" send ann olga v4 x >/dev/null
+check "a v0.4 ssh link still reaches its machine" "$(grep -c '"to":"olga"' "$M2/.telex/telex.jsonl")/$(grep -c '"to":"olga"' "$LOG")" "1/0"
+onB "$B" read ben >/dev/null; n="$(count "$M2/.telex/telex.jsonl")"; new() { echo $(( $(count "$M2/.telex/telex.jsonl") - n )); }
+refused=; for w in '{"Node":{},"UserProfile":{"LoginName":"other@x"}}' '{"Node":{"Tags":["tag:srv"]},"UserProfile":{"LoginName":"me@x"}}' '' '{}'; do
+  printf '%s' "$w" > "$T/whois"; refused="$refused$("$A" send ann ben@m2host hi x | grep -c '^Refused: ')"; done; rm "$T/whois"
+check "callers on another account, tagged, or unknown are refused, nothing stored" "$refused/$(new)" "1111/0"
+touch "$T/ts-off"; out="$("$A" send ann ben@m2host hi x)"; rm "$T/ts-off"
+check "a machine that is not ours, or Tailscale off here: nothing is sent" \
+  "$("$A" send ann ben@theirs hi x | grep -c '^Not sent: theirs')/$("$A" send ann ben@nowhere hi x | grep -c '^Not sent')/$(echo "$out" | grep -c '^Not sent')/$(new)" "1/1/1/0"
+m='{"from":"web","to":"ben","subject":"s","body":"b"}'
+raw "$P2" "POST / HTTP/1.1
+Host: x
+
+$m
+" >/dev/null; raw "$P2" "$m" >/dev/null; raw "$P2" '{"from":"web","to":"ben"}
+' >/dev/null; check "a web page's request, a cut-off line or a partial message stores nothing" "$(new)" "0"
+port "$P3" "$T/c-telex"; out="$("$T/c-telex" send ann ben@m2host hi x)"
+check "nobody listening there says so" "$(echo "$out" | grep -c "^Couldn't reach m2host; not sent (Connection refused)")" "1"
+serve "$P3" true; sleep 0.3
+check "no answer is not called sent" "$("$T/c-telex" send ann ben@m2host hi x)" "No confirmation from m2host; it may have arrived."
+"$A" send zed ben@m2host hi x >/dev/null          # now zed lives on this machine, as the other one sees it
 check "a recipient that lives elsewhere is refused, nothing stored, no forwarding" \
-  "$(echo "$out" | grep -c 'zed is not on this machine')/$(grep -c '"to":"zed"' "$M2/.telex/telex.jsonl")" "1/0"
-# a sender that only ever sent (never read) must still be woken by the reply
+  "$("$A" send ann zed@m2host loop x | grep -c 'zed is not on this machine')/$(grep -c '"to":"zed"' "$M2/.telex/telex.jsonl")" "1/0"
 : > "$FAKE_LOG"; echo S-NEW > "$HOME/stopped"; onB "$B" read ben >/dev/null
-CLAUDE_CODE_SESSION_ID=S-NEW "$C" send newbie ben@m2host hello x >/dev/null
+CLAUDE_CODE_SESSION_ID=S-NEW "$A" send newbie ben@m2host hello x >/dev/null
 out="$(onB CLAUDE_CODE_SESSION_ID=S-BEN "$B" send ben newbie 'Re: hello' back)"; sleep 1.5
 check "a sender that only sent is linked, and the reply wakes it" \
   "$(echo "$out" | grep -c 'new name')/$(grep -c -- '--resume S-NEW' "$FAKE_LOG")" "0/1"
 : > "$HOME/stopped"; : > "$FAKE_LOG"
+svc() { find "$HOME/Library/LaunchAgents" "$HOME/.config/systemd" -name 'telex*' 2>/dev/null | count; }
+: > "$T/svc"; a="$("$C" install | grep -c 'listening for your other machines')"; b="$(svc)"; touch "$T/ts-off"
+check "install starts the listener; without Tailscale it says this machine only" \
+  "$a/$([ "$b" -gt 0 ] && echo files)/$(grep -cE 'bootstrap|enable' "$T/svc")/$("$C" install | grep -c 'this machine only')" "1/files/1/1"; rm "$T/ts-off"
 
 touch "$HOME/telex" "$HOME/.lock"
 check "uninstall refuses TELEX_DIR of / or home" "$(TELEX_DIR=/ "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$(TELEX_DIR="$HOME/" "$C" uninstall 2>&1 >/dev/null | grep -c refusing)/$([ -e "$HOME/telex" ] && echo kept)" "1/1/kept"
@@ -270,6 +292,6 @@ printf '#!/bin/sh\necho foreign\n' > "$LB/telex"; chmod +x "$LB/telex"; "$C" uni
 check "uninstall leaves a foreign telex" "$("$LB/telex")" "foreign"
 check "uninstall gives back the user's settings exactly" "$(jq -S . "$HOME/.claude/settings.json")" "$(jq -S . "$T/settings.orig")"
 check "uninstall removes what install added, and the room" \
-  "$(find "$HOME/.claude/skills" "$HOME/.agents/skills" "$HOME/.pi/agent/extensions" -name '*telex*' 2>/dev/null | count)/$([ -e "$TELEX_DIR" ] && echo left || echo gone)" "0/gone"
+  "$(find "$HOME/.claude/skills" "$HOME/.agents/skills" "$HOME/.pi/agent/extensions" -name '*telex*' 2>/dev/null | count)/$([ -e "$TELEX_DIR" ] && echo left || echo gone)/$(svc)" "0/gone/0"
 
 echo; [ "$fails" -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
