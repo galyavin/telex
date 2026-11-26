@@ -11,6 +11,6 @@ Send: `telex send <you> <to> '<subject>' '<body>'`. Use the name your user gave 
 
 To reach an agent on another machine the first time, send to `<name>@<host>` (its Tailscale name); replies come back to plain names.
 
-To wait for mail before sending anything, check once: `telex read <you>`.
+When you take a name (or start again after /clear), run `telex read <you>` once, so mail to it wakes this session.
 
 When a "New telex" notice arrives, run the command in it. It prints your mail and how to reply.
