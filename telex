@@ -106,10 +106,10 @@ wake_claude() {                    # a stopped Claude session gets headless turn
 deliver() {                        # store "from to line [sender's machine]" here and wake the recipient here
   local target sid due; target="$(session_of "$2")"; sid="${target#*:}"
   [[ ! "$target" =~ ^(ts|ssh): ]] || { echo "$2 is not on this machine; not delivered"; exit 0; }   # never forwards
-  due="$(locked _send "$2" "$sid" "$3" "$1" "${4:-}")" || exit 1
-  if [ -n "$target" ]; then echo "Sent to $2."
-  else echo "Sent to $2 (new name; it gets this when it first reads)."; fi
-  [ "$due" = wake ] || exit 0
+  due="$(locked _send "$2" "$sid" "$3" "$1" "${4:-}")" || exit 1; u="${due#wake}"   # u: " (3 unread, oldest 40 min)" when mail was already waiting
+  if [ -n "$target" ]; then echo "Sent to $2$u."
+  else echo "Sent to $2 (new name; it gets this when it first reads)$u."; fi
+  [[ "$due" == wake* ]] || exit 0
   case "$target" in codex:*) wake_codex "$2" "$sid" ;; claude:*) wake_claude "$2" "$sid" ;; esac
   exit 0
 }
@@ -225,8 +225,9 @@ case "$cmd" in
   _send)                              # args: recipient, its session id, the line, sender, [its machine]. Skip the wake only while a queued Codex notice
                                       # (under 10 minutes old) still covers mail that was already waiting; a Claude wake checks its lock
     register "$4" "${5:-}"
-    { [ -z "$(find "$DIR/.wake-$2" -mmin -10 2>/dev/null)" ] || [ "$(unread_n "$1")" -eq 0 ]; } && echo wake
-    append "$3" ;;
+    { [ -z "$(find "$DIR/.wake-$2" -mmin -10 2>/dev/null)" ] || [ "$(unread_n "$1")" -eq 0 ]; } && printf wake
+    append "$3"; unread "$1" | jq -rsj 'select(length > 1) | (now - (.[0].ts | fromdate? // now)) as $a | " (\(length) unread, oldest \(
+      if $a < 3600 then "\($a / 60 | floor) min" elif $a < 172800 then "\($a / 3600 | floor) h" else "\($a / 86400 | floor) days" end))"' ;;
   _read)
     register "$1"
     msgs="$(unread "$1")"

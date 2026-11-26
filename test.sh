@@ -212,6 +212,10 @@ check "a session that took a second name still rings for the first" "$("$C" _bel
 
 # names ignore case
 check "Bob and bob are one mailbox" "$("$C" send carol Bob hi x)/$(unread bob)" "Sent to bob./1"
+uh() { "$C" send carol uh1 "$1" x | sed 's/.*reads)//'; }                # a sender sees mail piling up; a new name gets the same hint
+check "a burst of 3 shows no hint, then 2, then 3 unread" "$(uh a)|$(uh b)|$(uh c)" ".| (2 unread, oldest 0 min).| (3 unread, oldest 0 min)."
+age() { jq -cn --argjson s "$1" '{ts: (now - $s | todate), from: "x", to: "uh2", subject: "old", body: ""}' >> "$LOG"; "$C" send carol uh2 n x | grep -o 'oldest [^)]*'; "$C" read uh2 >/dev/null; }
+check "the oldest one's age rounds down: min, h, days" "$(age 3540)/$(age 3600)/$(age 172000)/$(age 172800)" "oldest 59 min/oldest 1 h/oldest 47 h/oldest 2 days"
 
 # read mail is not kept: each read compacts the log to links plus unread mail
 "$C" read alice >/dev/null; "$C" send alice bob keep me >/dev/null; "$C" send bob alice drop me >/dev/null; "$C" read alice >/dev/null
@@ -235,7 +239,7 @@ check "linked: hints and notices say telex, rule added, full-path rules kept" \
   "$(readlink "$LB/telex" | grep -c '/.telex/telex$')/$(hint nl3)/$(PI_SESSION_ID=P-NL "$C" read nl4 >/dev/null; "$C" send bob nl4 hi x >/dev/null; "$C" _bell pi:P-NL | grep -c 'Run: telex read nl4')/$(jq -r '[.permissions.allow[] | select(startswith("Bash(") and contains("telex"))] | length' "$HOME/.claude/settings.json")" \
   "1/Reply: telex/1/3"
 "$C" read nl4 >/dev/null
-CLAUDE_CODE_SESSION_ID=S-LNK "$C" read nl5 >/dev/null; echo S-LNK > "$HOME/stopped"; "$C" send bob nl5 hi x >/dev/null; sleep 1.5
+CLAUDE_CODE_SESSION_ID=S-LNK "$C" read nl5 >/dev/null; echo S-LNK > "$HOME/stopped"; "$C" send bob nl5 hi x >/dev/null; for i in $(seq 50); do grep -q '"to":"nl5"' "$LOG" || break; sleep 0.1; done
 check "headless turn finds telex through ~/.local/bin" "$(grep -c 'Run: telex read nl5' "$HOME/wakes")/$(unread nl5)" "1/0"
 : > "$HOME/stopped"; : > "$FAKE_LOG"
 
@@ -260,6 +264,7 @@ onB CLAUDE_CODE_SESSION_ID=S-BEN "$B" send ben ann 'Re: hello' 'second' >/dev/nu
 check "a reply to a plain name goes back to its machine" "$("$A" read ann | grep -c '^second$')/$(route "$M1/.telex" ben)" "1/ts:127.0.0.1"
 "$A" send ann ben 'plain again' 'third' >/dev/null
 check "a plain name linked to another machine needs no name@host" "$(onB "$B" read ben | grep -c '^third$')" "1"
+"$A" send ann ben p1 x >/dev/null; check "a remote sender gets the unread hint back" "$("$A" send ann ben p2 x)" "Sent to ben (2 unread, oldest 0 min)."; onB "$B" read ben >/dev/null
 "$A" send ann ben@m2host quoting "it's \"q\" \$HOME \`id\` ; & * ünï
 second line" >/dev/null
 check "tricky bodies cross intact" "$(LOG="$M2/.telex/telex.jsonl" rows 'select(.subject == "quoting") | .body')" "it's \"q\" \$HOME \`id\` ; & * ünï
