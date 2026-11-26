@@ -82,10 +82,12 @@ wake_codex() {                     # the .wake file marks a notice already queue
     || echo "Could not wake $name in Codex; the mail waits."   # a queued-but-not-resumed message warns on stderr yet exits 0; "active writer" = an open app thread runs it itself
 }
 wake_claude() {                    # a stopped Claude session gets headless turns until its mail is read; success = they started
-  local name="$1" sid="$2" cl cwd self
-  "${TRY[@]}" "$DIR/.listen-$sid" true || return 1   # a listener or a headless drive already has it: no need to ask Claude
+  local name="$1" sid="$2" cl cwd self st f n; st="$(status_of "$sid")"; f=("$HOME"/.claude/projects/*/"$sid".jsonl)
+  [ "$st" = stopped ] && [ -f "$f" ] && n="$(grep -lE "\"id\":\"$sid\",\"via\":\"(clear|compact)\"" "${f%/*}"/*.jsonl | grep -vxF "$f" | head -1)" \
+    && n="${n##*/}" && n="${n%.jsonl}" && [ -n "$n" ] && { locked _join "$name" "claude:$n"; wake_claude "$name" "$n"; return; }   # /clear or compaction moved it to a new session (only in its folder; a /resume is not one)
+  "${TRY[@]}" "$DIR/.listen-$sid" true || return 1   # a listener or a headless drive already has it
   cl="$(claude_bin)"; self="$(realpath "$0")"; p="$PATH"; [ "$CMD" = telex ] && p="$HOME/.local/bin:$p"
-  case "$(status_of "$sid")" in
+  case "$st" in
     stopped) ;;                                           # only a real session list may say "stopped"
     unknown) echo "Couldn't check whether $name's session is running; it gets this when it next runs."; return 1 ;;
     *) return 1 ;;                                        # running, and no listener yet: the next Stop starts one
@@ -219,7 +221,7 @@ case "$cmd" in
     rmdir "$DIR/skill" "$DIR/pi" "$DIR" 2>/dev/null
     echo "telex removed."; exit 0 ;;
 
-  _join) register "$1" ;;
+  _join) register "$1" "${2:-}" ;;
   _send)                              # args: recipient, its session id, the line, sender, [its machine]. Skip the wake only while a queued Codex notice
                                       # (under 10 minutes old) still covers mail that was already waiting; a Claude wake checks its lock
     register "$4" "${5:-}"

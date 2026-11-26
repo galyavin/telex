@@ -145,6 +145,21 @@ printf '{"cwd":"%s"}\n{"cwd":"%s"}\n' "$T/moved-away" "$T/proj" > "$HOME/.claude
 CLAUDE_CODE_SESSION_ID=S-MV "$C" read mvx >/dev/null; echo S-MV > "$HOME/stopped"; : > "$FAKE_LOG"
 "$C" send bob mvx hi x >/dev/null; sleep 1.5
 check "a session whose first folder is gone is woken in its last one" "$(grep -c "^$(realpath "$T/proj") session= -p --resume S-MV" "$FAKE_LOG")/$(unread mvx)" "1/0"
+# /clear or compaction moves a conversation to a new session id; the new transcript says where it came from
+mk() { mkdir -p "$HOME/.claude/projects/$1"; printf '{"type":"derived-from","v":1,"sessionId":"%s","sessions":[{"type":"claude_code_session","id":"%s","via":"%s"}]}\n{"cwd":"%s"}\n' "$2" "$3" "$4" "$T/proj" > "$HOME/.claude/projects/$1/$2.jsonl"; }
+link() { grep "\"from\":\"$1\",\"to\":\"telex\"" "$LOG" | tail -1 | grep -o 'claude:[^"]*'; }
+woke() { : > "$FAKE_LOG"; CLAUDE_CODE_SESSION_ID="$2" "$C" read "$1" >/dev/null; perl -e "alarm 10; exec @ARGV" "$C" send bob "$1" hi x >/dev/null; sleep 1.5; grep -o -- '--resume [^ ]*' "$FAKE_LOG" | cut -c10- | tr '\n' ' '; link "$1"; }
+mk p S-C1 S-C0 launch; mk p S-C2 S-C1 clear; printf 'S-C1\nS-C2\n' > "$HOME/stopped"
+check "after /clear, mail to the old session wakes the new one, which takes the name" "$(woke cl1 S-C1)" "S-C2 claude:S-C2"
+mk p S-H2 S-H1 clear; mk p S-H3 S-H2 compact; echo '{}' > "$HOME/.claude/projects/p/S-H1.jsonl"; printf 'S-H1\nS-H2\nS-H3\n' > "$HOME/stopped"
+check "a chain of clears is followed to its end" "$(woke ch1 S-H1)" "S-H3 claude:S-H3"
+mk p S-SF S-SF compact; echo S-SF > "$HOME/stopped"
+check "a compaction record pointing at itself is not a successor" "$(woke sf1 S-SF)" "S-SF claude:S-SF"
+echo '{}' > "$HOME/.claude/projects/p/S-R1.jsonl"; mk p S-R2 S-R1 resume; mk p2 S-O2 S-R1 clear; printf 'S-R1\nS-R2\nS-O2\n' > "$HOME/stopped"
+check "a /resume record, or one in another project folder, is not a successor" "$(woke rs1 S-R1)" "S-R1 claude:S-R1"
+echo '{}' > "$HOME/.claude/projects/p/S-U1.jsonl"; mk p S-U2 S-U1 clear; echo S-U1 > "$HOME/stopped"
+check "a running new session gets the name and no headless turn" "$(woke un1 S-U1)" "claude:S-U2"
+: > "$HOME/stopped"; : > "$FAKE_LOG"
 mkdir -p "$T/locked"; chmod 000 "$T/locked"; echo '{"cwd":"'"$T/locked"'"}' > "$HOME/.claude/projects/p/S-LK.jsonl"
 CLAUDE_CODE_SESSION_ID=S-LK "$C" read lkx >/dev/null; echo S-LK > "$HOME/stopped"; out="$("$C" send bob lkx hi x 2>/dev/null)"; chmod 755 "$T/locked"
 check "a drive that cannot start is not reported as started" "$(echo "$out" | grep -c 'Could not wake lkx')/$(echo "$out" | grep -c 'started a turn')" "1/0"
